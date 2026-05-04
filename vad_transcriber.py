@@ -18,10 +18,11 @@ from audio_recorder import AudioBufferManager, DeviceAudioBuffer
 
 logger = logging.getLogger(__name__)
 
-SAMPLE_RATE    = 16000
-FLUSH_INTERVAL = 0.5
-MIN_AUDIO_SECS = 1.5
-MIN_ENERGY     = 0.002
+SAMPLE_RATE      = 16000
+FLUSH_INTERVAL   = 0.5
+MIN_AUDIO_SECS   = 1.0
+PRE_ROLL_SECS    = 0.5   # keep this many seconds of audio at the end of silence so
+MIN_ENERGY       = 0.002 # speech onset isn't clipped waiting for the buffer to fill
 
 
 @dataclass
@@ -97,7 +98,7 @@ class WhisperTranscriber:
             vad_parameters=dict(
                 threshold=0.2,
                 min_silence_duration_ms=150,
-                speech_pad_ms=500,
+                speech_pad_ms=600,
             ),
             temperature=0.0,
             no_speech_threshold=0.6,
@@ -263,7 +264,10 @@ class VADTranscriptionPipeline:
                     logger.info(f"Device {device_id} silent")
                     if self.on_device_inactive:
                         asyncio.ensure_future(self.on_device_inactive(device_id))
-                buf.mark_transcribed(len(audio))
+                # Advance all but the last PRE_ROLL_SECS so the next speech
+                # segment starts with context already in the buffer.
+                pre_roll = int(PRE_ROLL_SECS * SAMPLE_RATE)
+                buf.mark_transcribed(max(0, len(audio) - pre_roll))
                 continue
 
             self._silence_streak[device_id] = 0
