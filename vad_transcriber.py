@@ -9,6 +9,7 @@ Flush every 0.5s, MIN_AUDIO_SECS=2.5, beam_size=5, strict EN/ES only.
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
 import numpy as np
@@ -42,11 +43,15 @@ class WhisperTranscriber:
         self.model        = None
         self._stub_mode   = False
         self._busy        = False
+        self._executor    = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper")
+
+    def shutdown(self) -> None:
+        self._executor.shutdown(wait=False)
 
     async def load(self) -> None:
         loop = asyncio.get_event_loop()
         try:
-            await loop.run_in_executor(None, self._load_sync)
+            await loop.run_in_executor(self._executor, self._load_sync)
             logger.info(f"Whisper '{self.model_size}' loaded on {self.device}")
         except ImportError:
             logger.warning("faster-whisper not installed — stub mode")
@@ -73,7 +78,7 @@ class WhisperTranscriber:
         self._busy = True
         try:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, lambda: self._transcribe_sync(audio))
+            return await loop.run_in_executor(self._executor, lambda: self._transcribe_sync(audio))
         except Exception as e:
             logger.error(f"Transcription error: {e}")
             return None
@@ -180,6 +185,8 @@ class VADTranscriptionPipeline:
     async def shutdown(self) -> None:
         for task in self._flush_tasks.values():
             task.cancel()
+        for whisper in self._whispers.values():
+            whisper.shutdown()
 
     def register_speaker(self, device_id: int, name: str) -> None:
         whisper = WhisperTranscriber(self.model_size, self.cuda_device, self.compute_type)
@@ -197,7 +204,8 @@ class VADTranscriptionPipeline:
     def unregister_speaker(self, device_id: int) -> None:
         if task := self._flush_tasks.pop(device_id, None):
             task.cancel()
-        self._whispers.pop(device_id, None)
+        if whisper := self._whispers.pop(device_id, None):
+            whisper.shutdown()
         self._speaker_names.pop(device_id, None)
         self._device_active.pop(device_id, None)
         self._silence_streak.pop(device_id, None)
