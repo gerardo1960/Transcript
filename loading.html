@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Iniciando...</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0c10;
+      color: #e8eaf0;
+      font-family: 'Inter', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      gap: 32px;
+    }
+    .title {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: white;
+    }
+    .title span { color: #00e5ff; }
+    .mic-icon {
+      font-size: 64px;
+      animation: breathe 2s ease-in-out infinite;
+    }
+    @keyframes breathe {
+      0%, 100% { transform: scale(1);   opacity: 0.7; }
+      50%       { transform: scale(1.1); opacity: 1;   }
+    }
+    .status {
+      font-size: 15px;
+      color: #6b7390;
+      font-family: 'DM Mono', monospace;
+      letter-spacing: 0.04em;
+    }
+    .dots {
+      display: flex;
+      gap: 8px;
+    }
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #00e5ff;
+      animation: bounce 1.2s ease-in-out infinite;
+      opacity: 0.3;
+    }
+    .dot:nth-child(1) { animation-delay: 0s; }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 100% { opacity: 0.2; transform: scale(0.8); }
+      50%       { opacity: 1;   transform: scale(1.2); }
+    }
+    .ready {
+      color: #7cfc5e;
+      font-size: 15px;
+      font-family: monospace;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="mic-icon">🎙</div>
+  <div class="title">LIVE <span>TRANSCRIPT</span></div>
+  <div class="dots">
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+  <div class="status" id="status">Cargando modelo de IA...</div>
+  <div class="ready" id="ready">✓ Listo — abriendo...</div>
+
+  <script>
+    const status = document.getElementById('status');
+    const ready  = document.getElementById('ready');
+    let attempts = 0;
+
+    const messages = [
+      "Cargando modelo de IA...",
+      "Iniciando servidor...",
+      "Conectando micrófonos...",
+      "Casi listo...",
+    ];
+
+    async function checkServer() {
+      attempts++;
+      status.textContent = messages[Math.min(Math.floor(attempts / 5), messages.length - 1)];
+
+      try {
+        const res = await fetch('http://localhost:8000/api/speakers', { signal: AbortSignal.timeout(1000) });
+        if (res.ok) {
+          ready.style.display = 'block';
+          status.style.display = 'none';
+          setTimeout(() => { window.location.href = 'http://localhost:8000'; }, 800);
+          return;
+        }
+      } catch (e) {}
+
+      setTimeout(checkServer, 1000);
+    }
+
+    checkServer();
+  </script>
+</body>
+</html>

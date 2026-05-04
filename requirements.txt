@@ -1,0 +1,20 @@
+# ── Core framework ──────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+websockets>=12.0
+pydantic>=2.7.0
+
+# ── Audio processing ─────────────────────────────────────────────────────────
+numpy>=1.26.0
+
+# ── AI transcription (GPU build — install AFTER CUDA is confirmed) ───────────
+# faster-whisper requires CTranslate2 with CUDA support.
+# Install separately with the correct CUDA wheel:
+#   pip install faster-whisper
+# Or for CUDA 12.x:
+#   pip install ctranslate2 --extra-index-url https://download.pytorch.org/whl/cu121
+faster-whisper>=1.0.0
+
+# ── Optional: Silero VAD for more accurate speech detection ─────────────────
+# torch>=2.2.0   # uncomment if using Silero VAD
+# torchaudio>=2.2.0

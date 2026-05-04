@@ -1,0 +1,4 @@
+models/
+recordings/
+__pycache__/
+*.log
