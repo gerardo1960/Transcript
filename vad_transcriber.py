@@ -91,10 +91,15 @@ class WhisperTranscriber:
             language=None,
             task="transcribe",
             beam_size=5,
-            vad_filter=False,
+            vad_filter=True,
+            vad_parameters=dict(
+                threshold=0.2,
+                min_silence_duration_ms=150,
+                speech_pad_ms=500,
+            ),
             temperature=0.0,
-            no_speech_threshold=0.5,
-            condition_on_previous_text=True,
+            no_speech_threshold=0.6,
+            condition_on_previous_text=False,
         )
 
         # Strict: only EN or ES, never anything else
