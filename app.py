@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, FileResponse, Response
 from pydantic import BaseModel
 
 from audio_manager import PipeWireAudioManager, AudioDevice
-from vad_transcriber import VADTranscriptionPipeline, TranscriptSegment
+from vad_transcriber import VADTranscriptionPipeline, TranscriptSegment, EXCLUSIVE_SLOTS
 from audio_recorder import AudioBufferManager
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -97,10 +97,7 @@ async def on_transcript_received(segment: TranscriptSegment) -> None:
 # ── Audio callback — feeds BOTH layers ───────────────────────────────────────
 
 async def on_audio_chunk(device_id: int, pcm: np.ndarray) -> None:
-    # Layer 2: write to WAV file immediately — no drops, no gaps
     buffer_mgr.add_chunk(device_id, pcm)
-    # Layer 1: feed transcription pipeline
-    await pipeline.process_audio_chunk(device_id, pcm)
 
 
 # ── Startup / Shutdown ────────────────────────────────────────────────────────
@@ -128,7 +125,8 @@ async def startup():
         [d for d in devices if "alsa_input.usb" in d.pw_node_name.lower()],
         key=lambda d: d.id
     )
-    default_names = ["Speaker 1", "Speaker 2", "Speaker 3", "Speaker 4"]
+    default_names = ["Speaker 1", "Speaker 2", "Speaker 3", "Speaker 4",
+                     "Speaker 5", "Speaker 6", "Speaker 7", "Speaker 8"]
     name_idx = 0
     for device in usb_devices:
         if name_idx >= len(default_names):
@@ -165,8 +163,7 @@ async def startup():
             name_idx += 1
 
     pipeline.buffer_mgr = buffer_mgr
-    await pipeline.load_all_whispers()
-    logger.info(f"System ready — {len(devices)} device(s) active")
+    logger.info(f"System ready — {len(active_speakers)} speaker(s) active")
     
     asyncio.create_task(hotplug_scanner())
     asyncio.create_task(pipewire_watchdog())
@@ -407,7 +404,7 @@ async def set_gain(req: GainRequest):
     device = audio_manager.get_device(req.device_id)
     if not device:
         return {"success": False, "error": "Device not found"}
-    gain = max(30, min(100, req.gain_pct))
+    gain = max(0, min(100, req.gain_pct))
     try:
         result = subprocess.run(
             ["pactl", "set-source-volume", device.pw_node_name, f"{gain}%"],
@@ -448,6 +445,34 @@ async def get_gain(device_id: int):
         return {"success": True, "gain_pct": gain}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ── Pool Assignment ───────────────────────────────────────────────────────────
+
+@app.get("/api/pool_status")
+async def get_pool_status():
+    return pipeline.get_pool_status()
+
+class AssignExclusiveRequest(BaseModel):
+    device_id: int
+    slot_idx:  int
+
+@app.post("/api/assign_exclusive")
+async def assign_exclusive(req: AssignExclusiveRequest):
+    success = pipeline.assign_exclusive(req.device_id, req.slot_idx)
+    if success:
+        await broadcast({"type": "pool_changed", "data": pipeline.get_pool_status()})
+    return {"success": success}
+
+class UnassignRequest(BaseModel):
+    device_id: int
+
+@app.post("/api/unassign_exclusive")
+async def unassign_exclusive(req: UnassignRequest):
+    success = pipeline.unassign_exclusive(req.device_id)
+    if success:
+        await broadcast({"type": "pool_changed", "data": pipeline.get_pool_status()})
+    return {"success": success}
 
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
