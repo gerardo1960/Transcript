@@ -96,7 +96,7 @@ class WhisperTranscriber:
             beam_size=5,
             vad_filter=True,
             vad_parameters=dict(
-                threshold=0.2,
+                threshold=0.1,
                 min_silence_duration_ms=150,
                 speech_pad_ms=600,
             ),
@@ -145,8 +145,9 @@ class WhisperTranscriber:
             "esta es una conversación en español y inglés",
             "this is a conversation in english and spanish.",
             "this is a conversation in english and spanish",
-            # Common Whisper Spanish religious hallucinations on low-SNR audio
-            "amén.", "amén", "amen.", "amen",
+            # Common Whisper religious hallucinations (English and Spanish)
+            "let's pray.", "let's pray", "let us pray.", "let us pray",
+            "amen.", "amen", "amén.", "amén",
             "gracias a dios.", "gracias a dios",
             "dios te bendiga.", "dios te bendiga",
             "en el nombre de dios.", "en el nombre de dios",
@@ -320,8 +321,9 @@ class VADTranscriptionPipeline:
         detected_prob = whisper.last_detected_language_probability
         if detected in ("en", "es"):
             if current_lang is None:
-                # No language established yet — lock on first confident detection
-                if detected_prob >= 0.7:
+                # No language established yet — require high confidence to avoid
+                # locking to the wrong language on a noisy/short first chunk.
+                if detected_prob >= 0.85:
                     self._device_language[device_id] = detected
                     self._language_streak[device_id] = 0
                     logger.info(f"Device {device_id}: language locked to '{detected}' (p={detected_prob:.2f})")
