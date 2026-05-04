@@ -44,6 +44,8 @@ class WhisperTranscriber:
         self._stub_mode   = False
         self._busy        = False
         self._executor    = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper")
+        self.last_detected_language:             Optional[str] = None
+        self.last_detected_language_probability: float         = 0.0
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=False)
@@ -70,7 +72,7 @@ class WhisperTranscriber:
             download_root="./models",
         )
 
-    async def transcribe(self, audio: np.ndarray) -> Optional[TranscriptSegment]:
+    async def transcribe(self, audio: np.ndarray, language: Optional[str] = None) -> Optional[TranscriptSegment]:
         if self._stub_mode:
             return self._stub(audio)
         if self.model is None or self._busy:
@@ -78,17 +80,17 @@ class WhisperTranscriber:
         self._busy = True
         try:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(self._executor, lambda: self._transcribe_sync(audio))
+            return await loop.run_in_executor(self._executor, lambda: self._transcribe_sync(audio, language))
         except Exception as e:
             logger.error(f"Transcription error: {e}")
             return None
         finally:
             self._busy = False
 
-    def _transcribe_sync(self, audio: np.ndarray) -> Optional[TranscriptSegment]:
+    def _transcribe_sync(self, audio: np.ndarray, language: Optional[str] = None) -> Optional[TranscriptSegment]:
         segments, info = self.model.transcribe(
             audio,
-            language=None,
+            language=language,
             task="transcribe",
             beam_size=5,
             vad_filter=True,
@@ -101,6 +103,9 @@ class WhisperTranscriber:
             no_speech_threshold=0.6,
             condition_on_previous_text=False,
         )
+
+        self.last_detected_language             = info.language
+        self.last_detected_language_probability = info.language_probability
 
         # Strict: only EN or ES, never anything else
         if info.language not in ("en", "es"):
@@ -173,6 +178,8 @@ class VADTranscriptionPipeline:
         self._device_active:     Dict[int, bool] = {}
         self._silence_streak:    Dict[int, int] = {}
         self._noise_gate:        Dict[int, float] = {}
+        self._device_language:   Dict[int, Optional[str]] = {}
+        self._language_streak:   Dict[int, int] = {}
         self.buffer_mgr:         Optional[AudioBufferManager] = None
         self.on_transcript:      Optional[Callable] = None
         self.on_device_inactive: Optional[Callable] = None
@@ -195,11 +202,13 @@ class VADTranscriptionPipeline:
 
     def register_speaker(self, device_id: int, name: str) -> None:
         whisper = WhisperTranscriber(self.model_size, self.cuda_device, self.compute_type)
-        self._whispers[device_id]       = whisper
-        self._speaker_names[device_id]  = name
-        self._device_active[device_id]  = True
-        self._silence_streak[device_id] = 0
-        self._noise_gate[device_id]     = MIN_ENERGY
+        self._whispers[device_id]          = whisper
+        self._speaker_names[device_id]     = name
+        self._device_active[device_id]     = True
+        self._silence_streak[device_id]    = 0
+        self._noise_gate[device_id]        = MIN_ENERGY
+        self._device_language[device_id]   = None
+        self._language_streak[device_id]   = 0
         task = asyncio.create_task(
             self._flush_loop(device_id), name=f"flush_{device_id}"
         )
@@ -215,6 +224,8 @@ class VADTranscriptionPipeline:
         self._device_active.pop(device_id, None)
         self._silence_streak.pop(device_id, None)
         self._noise_gate.pop(device_id, None)
+        self._device_language.pop(device_id, None)
+        self._language_streak.pop(device_id, None)
 
     def update_speaker_name(self, device_id: int, name: str) -> None:
         self._speaker_names[device_id] = name
@@ -281,8 +292,32 @@ class VADTranscriptionPipeline:
             buf.mark_transcribed(n_samples)
             return
 
-        segment = await whisper.transcribe(audio)
+        current_lang = self._device_language.get(device_id)
+        segment = await whisper.transcribe(audio, language=current_lang)
         buf.mark_transcribed(n_samples)
+
+        # Language momentum — update after every chunk regardless of transcript result
+        detected      = whisper.last_detected_language
+        detected_prob = whisper.last_detected_language_probability
+        if detected in ("en", "es"):
+            if current_lang is None:
+                # No language established yet — lock on first confident detection
+                if detected_prob >= 0.7:
+                    self._device_language[device_id] = detected
+                    self._language_streak[device_id] = 0
+                    logger.info(f"Device {device_id}: language locked to '{detected}' (p={detected_prob:.2f})")
+            elif detected == current_lang:
+                # Confirms current language — reset switch streak
+                self._language_streak[device_id] = 0
+            elif detected_prob >= 0.85:
+                # Strong signal for the other language — build streak
+                streak = self._language_streak.get(device_id, 0) + 1
+                self._language_streak[device_id] = streak
+                if streak >= 3:
+                    logger.info(f"Device {device_id}: language switch '{current_lang}' → '{detected}' after {streak} chunks")
+                    self._device_language[device_id] = detected
+                    self._language_streak[device_id] = 0
+            # Weak signal for other language: ignore, don't change streak
 
         if segment and segment.text.strip():
             segment.device_id    = device_id
