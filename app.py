@@ -173,9 +173,9 @@ async def pipewire_watchdog():
 
             energies = []
             for buf in buffers:
-                if buf.chunks:
-                    audio = np.concatenate(buf.chunks[-5:])
-                    energies.append(float(np.sqrt(np.mean(audio ** 2))))
+                pending = buf.get_pending()
+                if pending is not None and len(pending) > 0:
+                    energies.append(float(np.sqrt(np.mean(pending[-2400:] ** 2))))
 
             if len(energies) < 2:
                 consecutive_fused = 0

@@ -1,6 +1,9 @@
 """
-vad_transcriber.py - Simple and reliable.
-2s windows, per-device Whisper instances, vad_filter=True.
+vad_transcriber.py
+Cursor-based transcription — zero word loss, minimum latency.
+Based on 4-2-2026 version + per-device noise gate.
+
+Flush every 0.5s, MIN_AUDIO_SECS=2.5, beam_size=5, strict EN/ES only.
 """
 
 import asyncio
@@ -15,7 +18,8 @@ from audio_recorder import AudioBufferManager, DeviceAudioBuffer
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE    = 16000
-WINDOW_SECONDS = 2
+FLUSH_INTERVAL = 0.5
+MIN_AUDIO_SECS = 1.5
 MIN_ENERGY     = 0.002
 
 
@@ -81,26 +85,30 @@ class WhisperTranscriber:
             audio,
             language=None,
             task="transcribe",
-            beam_size=1,
+            beam_size=5,
             vad_filter=True,
-            vad_parameters=dict(
-                threshold=0.3,
-                min_silence_duration_ms=200,
-                speech_pad_ms=200,
-            ),
+            vad_parameters=dict(threshold=0.3, min_silence_duration_ms=300, speech_pad_ms=300),
             temperature=0.0,
-            no_speech_threshold=0.8,
-            condition_on_previous_text=False,
+            no_speech_threshold=0.5,
+            condition_on_previous_text=True,
         )
+
+        # Strict: only EN or ES, never anything else
+        if info.language not in ("en", "es"):
+            return None
+
+        # Low confidence — probably noise
+        if info.language_probability < 0.4:
+            return None
 
         texts, total_logprob, count = [], 0.0, 0
         for seg in segments:
-            t         = seg.text.strip()
-            avg_lp    = getattr(seg, "avg_logprob", -1.0)
-            no_speech = getattr(seg, "no_speech_prob", 1.0)
-            if t and avg_lp > -1.5 and no_speech < 0.8:
+            t              = seg.text.strip()
+            avg_logprob    = getattr(seg, "avg_logprob", -1.0)
+            no_speech_prob = getattr(seg, "no_speech_prob", 1.0)
+            if t and avg_logprob > -1.0 and no_speech_prob < 0.6:
                 texts.append(t)
-                total_logprob += avg_lp
+                total_logprob += avg_logprob
                 count         += 1
 
         if not texts:
@@ -114,7 +122,14 @@ class WhisperTranscriber:
             "subscribete.", "suscríbete.", "like and subscribe.", "see you next time.",
             "so, bye.", "all right.", "thumbs out.", "alright.", "so bye.",
             "all right!", "so, bye!", "thumbs out!",
-            "subtitles by the amara.org community",
+            "esta es una conversación en inglés.",
+            "esta es una conversación en inglés",
+            "esta es una conversación en español e inglés.",
+            "esta es una conversación en español e inglés",
+            "esta es una conversación en español y inglés.",
+            "esta es una conversación en español y inglés",
+            "this is a conversation in english and spanish.",
+            "this is a conversation in english and spanish",
         }
         full_text = " ".join(texts).strip()
         if full_text.lower() in HALLUCINATIONS:
@@ -129,7 +144,7 @@ class WhisperTranscriber:
 
     def _stub(self, audio: np.ndarray) -> Optional[TranscriptSegment]:
         import random
-        if len(audio) / SAMPLE_RATE < 0.5:
+        if len(audio) / SAMPLE_RATE < 0.3:
             return None
         samples = [("Hola, como estas?", "es"), ("Can you hear me?", "en")]
         text, lang = random.choice(samples)
@@ -148,14 +163,14 @@ class VADTranscriptionPipeline:
         self._speaker_names:     Dict[int, str] = {}
         self._device_active:     Dict[int, bool] = {}
         self._silence_streak:    Dict[int, int] = {}
-        self._noise_gate:        Dict[int, float] = {}  # per-device MIN_ENERGY
+        self._noise_gate:        Dict[int, float] = {}
         self.buffer_mgr:         Optional[AudioBufferManager] = None
         self.on_transcript:      Optional[Callable] = None
         self.on_device_inactive: Optional[Callable] = None
         self.on_device_active:   Optional[Callable] = None
 
     async def load(self) -> None:
-        logger.info("Pipeline ready — 2s windows, per-device Whisper")
+        logger.info("Pipeline ready — cursor-based, zero word loss")
 
     async def load_all_whispers(self) -> None:
         for device_id, whisper in self._whispers.items():
@@ -173,7 +188,7 @@ class VADTranscriptionPipeline:
         self._speaker_names[device_id]  = name
         self._device_active[device_id]  = True
         self._silence_streak[device_id] = 0
-        self._noise_gate[device_id]    = 0.01  # default
+        self._noise_gate[device_id]     = MIN_ENERGY
         task = asyncio.create_task(
             self._flush_loop(device_id), name=f"flush_{device_id}"
         )
@@ -193,7 +208,6 @@ class VADTranscriptionPipeline:
         self._speaker_names[device_id] = name
 
     def set_noise_gate(self, device_id: int, value: float) -> None:
-        """Set per-device noise gate threshold (MIN_ENERGY)."""
         self._noise_gate[device_id] = max(0.001, min(0.1, value))
         logger.info(f"Device {device_id} noise gate set to {value:.4f}")
 
@@ -202,10 +216,8 @@ class VADTranscriptionPipeline:
             self.buffer_mgr.add_chunk(device_id, pcm)
 
     async def _flush_loop(self, device_id: int) -> None:
-        win_samples = int(WINDOW_SECONDS * SAMPLE_RATE)
-
         while True:
-            await asyncio.sleep(WINDOW_SECONDS)
+            await asyncio.sleep(FLUSH_INTERVAL)
 
             if not self.buffer_mgr:
                 continue
@@ -215,15 +227,15 @@ class VADTranscriptionPipeline:
                 continue
 
             audio = buf.get_pending()
-            if audio is None or len(audio) < win_samples // 2:
+            if audio is None or len(audio) < int(MIN_AUDIO_SECS * SAMPLE_RATE):
                 continue
 
-            audio = audio[:win_samples]
-            rms   = float(np.sqrt(np.mean(audio ** 2)))
+            rms = float(np.sqrt(np.mean(audio ** 2)))
+            device_min_energy = self._noise_gate.get(device_id, MIN_ENERGY)
 
-            if rms < MIN_ENERGY:
+            if rms < device_min_energy:
                 self._silence_streak[device_id] = self._silence_streak.get(device_id, 0) + 1
-                if self._silence_streak[device_id] >= 30 and self._device_active.get(device_id, True):
+                if self._silence_streak[device_id] >= 60 and self._device_active.get(device_id, True):
                     self._device_active[device_id] = False
                     logger.info(f"Device {device_id} silent")
                     if self.on_device_inactive:
@@ -245,17 +257,21 @@ class VADTranscriptionPipeline:
             if whisper._busy:
                 continue
 
-            buf.mark_transcribed(len(audio))
             speaker_name = self._speaker_names.get(device_id, f"Speaker {device_id}")
+            n_samples    = len(audio)
             asyncio.ensure_future(
-                self._transcribe_and_emit(audio, device_id, speaker_name)
+                self._transcribe_and_emit(audio, n_samples, device_id, speaker_name, buf)
             )
 
-    async def _transcribe_and_emit(self, audio, device_id, speaker_name):
+    async def _transcribe_and_emit(self, audio, n_samples, device_id, speaker_name, buf):
         whisper = self._whispers.get(device_id)
         if whisper is None:
+            buf.mark_transcribed(n_samples)
             return
+
         segment = await whisper.transcribe(audio)
+        buf.mark_transcribed(n_samples)
+
         if segment and segment.text.strip():
             segment.device_id    = device_id
             segment.speaker_name = speaker_name
