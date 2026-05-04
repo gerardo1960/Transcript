@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 SAMPLE_RATE      = 16000
 FLUSH_INTERVAL   = 0.5
 MIN_AUDIO_SECS   = 1.0
-PRE_ROLL_SECS    = 0.5   # keep this many seconds of audio at the end of silence so
+PRE_ROLL_SECS    = 0.8   # keep this many seconds of audio at the end of silence so
 MIN_ENERGY       = 0.002 # speech onset isn't clipped waiting for the buffer to fill
 
 
@@ -113,7 +113,7 @@ class WhisperTranscriber:
             return None
 
         # Low confidence — probably noise
-        if info.language_probability < 0.4:
+        if info.language_probability < 0.25:
             return None
 
         texts, total_logprob, count = [], 0.0, 0
@@ -145,6 +145,21 @@ class WhisperTranscriber:
             "esta es una conversación en español y inglés",
             "this is a conversation in english and spanish.",
             "this is a conversation in english and spanish",
+            # Common Whisper Spanish religious hallucinations on low-SNR audio
+            "amén.", "amén", "amen.", "amen",
+            "gracias a dios.", "gracias a dios",
+            "dios te bendiga.", "dios te bendiga",
+            "en el nombre de dios.", "en el nombre de dios",
+            "en el nombre del padre.", "en el nombre del padre",
+            "en el nombre del padre, del hijo y del espíritu santo.",
+            "en el nombre del padre, del hijo y del espíritu santo",
+            "padre nuestro.", "padre nuestro",
+            "la iglesia.", "la iglesia", "en la iglesia.", "en la iglesia",
+            "señor.", "señores.", "el señor.",
+            "gloria a dios.", "gloria a dios",
+            "aleluya.", "aleluya", "hallelujah.", "hallelujah",
+            "dios mío.", "dios mío", "ay, dios mío.", "ay, dios mío",
+            "bendito sea dios.", "bendito sea dios",
         }
         full_text = " ".join(texts).strip()
         if full_text.lower() in HALLUCINATIONS:
