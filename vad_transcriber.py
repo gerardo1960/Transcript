@@ -91,11 +91,10 @@ class WhisperTranscriber:
     def _transcribe_sync(self, audio: np.ndarray, language: Optional[str] = None) -> Optional[TranscriptSegment]:
         segments, info = self.model.transcribe(
             audio,
-            language=None,
+            language=language,
             task="transcribe",
             beam_size=5,
             vad_filter=False,
-            initial_prompt="Conversación en español e inglés.",
             temperature=0.0,
             no_speech_threshold=0.6,
             condition_on_previous_text=False,
@@ -103,6 +102,9 @@ class WhisperTranscriber:
 
         self.last_detected_language             = info.language
         self.last_detected_language_probability = info.language_probability
+
+        if info.language not in ("en", "es"):
+            return None
 
         # Reject if Whisper is very uncertain about the language
         if info.language_probability < 0.25:
@@ -137,6 +139,14 @@ class WhisperTranscriber:
             "esta es una conversación en español y inglés",
             "this is a conversation in english and spanish.",
             "this is a conversation in english and spanish",
+            # Common Whisper YouTube/video closing hallucinations
+            "gracias por ver el video.", "gracias por ver el video",
+            "gracias por ver.", "gracias por ver",
+            "¡gracias por ver el video!", "¡gracias por ver!",
+            "no olvides suscribirte.", "no olvides suscribirte",
+            "suscríbete al canal.", "suscríbete al canal",
+            "hasta la próxima.", "hasta la próxima",
+            "hasta pronto.", "hasta pronto",
             # Common Whisper religious hallucinations (English and Spanish)
             "let's pray.", "let's pray", "let us pray.", "let us pray",
             "amen.", "amen", "amén.", "amén",

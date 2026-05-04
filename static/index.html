@@ -383,6 +383,45 @@
       50%       { height: 20px; }
     }
 
+    /* ─── Mic Controls ──────────────────────────────────────────────── */
+    .mic-controls {
+      flex-shrink: 0;
+      padding: 8px 18px;
+      border-top: 1px solid var(--border);
+      background: color-mix(in srgb, var(--speaker-color, var(--accent)) 3%, var(--surface));
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .mic-control-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .mic-control-row label {
+      min-width: 110px;
+      font-family: var(--font-ui);
+      font-size: 12px;
+    }
+
+    .mic-control-row input[type="range"] {
+      flex: 1;
+      accent-color: var(--speaker-color, var(--accent));
+      cursor: pointer;
+    }
+
+    .mic-control-val {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--speaker-color, var(--accent));
+      min-width: 44px;
+      text-align: right;
+    }
+
     /* ─── Settings Drawer ────────────────────────────────────────────── */
     #settings-overlay {
       display: none;
@@ -688,6 +727,9 @@
     const colorIdx = SPEAKER_INDEX[sp.device_id] ?? 0;
     const color = SPEAKER_COLORS[colorIdx];
     const initial = (sp.name || 'S')[0].toUpperCase();
+    const gainPct  = sp.gain_pct   || 70;
+    const gateRaw  = sp.noise_gate ? Math.round(sp.noise_gate * 1000) : 10;
+    const gateDisplay = (gateRaw / 1000).toFixed(3);
 
     const div = document.createElement('div');
     div.className = 'speaker-panel';
@@ -723,19 +765,19 @@
       <div class="mic-controls">
         <div class="mic-control-row">
           <label>🎙 Ganancia</label>
-          <input type="range" min="30" max="100" value="70"
+          <input type="range" min="30" max="100" value="${gainPct}"
             oninput="updateGain(${sp.device_id}, this.value)"
             onchange="setGain(${sp.device_id}, this.value)"
             id="gain-${sp.device_id}" />
-          <span class="mic-control-val" id="gain-val-${sp.device_id}">70%</span>
+          <span class="mic-control-val" id="gain-val-${sp.device_id}">${gainPct}%</span>
         </div>
         <div class="mic-control-row">
           <label>🔇 Umbral ruido</label>
-          <input type="range" min="1" max="50" value="10"
+          <input type="range" min="1" max="50" value="${gateRaw}"
             oninput="updateGate(${sp.device_id}, this.value)"
             onchange="setGate(${sp.device_id}, this.value)"
             id="gate-${sp.device_id}" />
-          <span class="mic-control-val" id="gate-val-${sp.device_id}">0.010</span>
+          <span class="mic-control-val" id="gate-val-${sp.device_id}">${gateDisplay}</span>
         </div>
       </div>
       <div class="waveform-bar">
@@ -922,6 +964,46 @@
     el.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+  }
+
+  // ── Font size ──────────────────────────────────────────────────────────
+  function changeFontSize(value) {
+    document.querySelectorAll('.transcript-text').forEach(el => {
+      el.style.fontSize = parseInt(value) + 'px';
+    });
+  }
+
+  // ── Mic Controls ───────────────────────────────────────────────────────
+  function updateGain(deviceId, value) {
+    document.getElementById(`gain-val-${deviceId}`).textContent = parseInt(value) + '%';
+  }
+
+  async function setGain(deviceId, value) {
+    const pct = parseInt(value);
+    document.getElementById(`gain-val-${deviceId}`).textContent = pct + '%';
+    try {
+      await fetch('/api/set_gain', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({device_id: deviceId, gain_pct: pct}),
+      });
+    } catch (e) { console.error('setGain failed', e); }
+  }
+
+  function updateGate(deviceId, value) {
+    document.getElementById(`gate-val-${deviceId}`).textContent = (parseInt(value) / 1000).toFixed(3);
+  }
+
+  async function setGate(deviceId, value) {
+    const f = parseInt(value) / 1000;
+    document.getElementById(`gate-val-${deviceId}`).textContent = f.toFixed(3);
+    try {
+      await fetch('/api/set_noise_gate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({device_id: deviceId, value: f}),
+      });
+    } catch (e) { console.error('setGate failed', e); }
   }
 
   // ── Utils ──────────────────────────────────────────────────────────────
