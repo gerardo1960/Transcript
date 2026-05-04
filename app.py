@@ -56,6 +56,9 @@ def extract_serial(pw_node_name: str) -> str:
     m = re.search(r'USB_Composite_Device_([A-F0-9]+)-', pw_node_name, re.IGNORECASE)
     if m:
         return m.group(1)[-4:].upper()
+    m = re.search(r'Wireless_Mic_Rx_([A-Z0-9]+)-', pw_node_name, re.IGNORECASE)
+    if m:
+        return m.group(1)[-6:].upper()
     return pw_node_name[-6:].upper()
 
 
@@ -121,24 +124,45 @@ async def startup():
 
     logger.info("Discovering audio devices …")
     devices = await audio_manager.discover_bluetooth_devices()
-    devices = sorted(
+    usb_devices = sorted(
         [d for d in devices if "alsa_input.usb" in d.pw_node_name.lower()],
         key=lambda d: d.id
     )
     default_names = ["Speaker 1", "Speaker 2", "Speaker 3", "Speaker 4"]
-    for i, device in enumerate(devices[:4]):
-        name   = default_names[i]
+    name_idx = 0
+    for device in usb_devices:
+        if name_idx >= len(default_names):
+            break
         serial = extract_serial(device.pw_node_name)
-        active_speakers[device.id] = {
-            "device_id": device.id,
-            "name": name,
-            "serial": serial,
-            "pw_node_name": device.pw_node_name,
-            "mac": device.mac_address,
-        }
-        pipeline.register_speaker(device.id, name)
-        buffer_mgr.register_device(device.id, serial)   # ← Layer 2
-        await audio_manager.start_capture(device, callback=on_audio_chunk)
+        if device.is_stereo:
+            for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
+                if name_idx >= len(default_names):
+                    break
+                name = default_names[name_idx]
+                active_speakers[dev_id] = {
+                    "device_id": dev_id,
+                    "name": name,
+                    "serial": serial + suffix,
+                    "pw_node_name": device.pw_node_name,
+                    "mac": device.mac_address,
+                }
+                pipeline.register_speaker(dev_id, name)
+                buffer_mgr.register_device(dev_id, serial + suffix)
+                name_idx += 1
+            await audio_manager.start_capture(device, callback=on_audio_chunk)
+        else:
+            name = default_names[name_idx]
+            active_speakers[device.id] = {
+                "device_id": device.id,
+                "name": name,
+                "serial": serial,
+                "pw_node_name": device.pw_node_name,
+                "mac": device.mac_address,
+            }
+            pipeline.register_speaker(device.id, name)
+            buffer_mgr.register_device(device.id, serial)
+            await audio_manager.start_capture(device, callback=on_audio_chunk)
+            name_idx += 1
 
     pipeline.buffer_mgr = buffer_mgr
     await pipeline.load_all_whispers()
@@ -198,18 +222,30 @@ async def pipewire_watchdog():
                     )
                     for device in usb_devices:
                         if device.id not in active_speakers:
-                            idx    = len(active_speakers)
-                            name   = f"Speaker {idx + 1}"
                             serial = extract_serial(device.pw_node_name)
-                            active_speakers[device.id] = {
-                                "device_id": device.id,
-                                "name": name,
-                                "serial": serial,
-                                "pw_node_name": device.pw_node_name,
-                                "mac": device.mac_address,
-                            }
-                            pipeline.register_speaker(device.id, name)
-                            buffer_mgr.register_device(device.id, serial)
+                            if device.is_stereo:
+                                for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
+                                    name = f"Speaker {len(active_speakers) + 1}"
+                                    active_speakers[dev_id] = {
+                                        "device_id": dev_id,
+                                        "name": name,
+                                        "serial": serial + suffix,
+                                        "pw_node_name": device.pw_node_name,
+                                        "mac": device.mac_address,
+                                    }
+                                    pipeline.register_speaker(dev_id, name)
+                                    buffer_mgr.register_device(dev_id, serial + suffix)
+                            else:
+                                name = f"Speaker {len(active_speakers) + 1}"
+                                active_speakers[device.id] = {
+                                    "device_id": device.id,
+                                    "name": name,
+                                    "serial": serial,
+                                    "pw_node_name": device.pw_node_name,
+                                    "mac": device.mac_address,
+                                }
+                                pipeline.register_speaker(device.id, name)
+                                buffer_mgr.register_device(device.id, serial)
                         await audio_manager.start_capture(device, callback=on_audio_chunk)
                     await broadcast({"type": "pipewire_restarted"})
                     consecutive_fused = 0
@@ -232,21 +268,36 @@ async def hotplug_scanner():
             )
             for device in usb_devices:
                 if device.id not in active_speakers and not device.active:
-                    idx    = len(active_speakers)
-                    name   = f"Speaker {idx + 1}"
                     serial = extract_serial(device.pw_node_name)
-                    active_speakers[device.id] = {
-                        "device_id": device.id,
-                        "name": name,
-                        "serial": serial,
-                        "pw_node_name": device.pw_node_name,
-                        "mac": device.mac_address,
-                    }
-                    pipeline.register_speaker(device.id, name)
-                    buffer_mgr.register_device(device.id, serial)
-                    await audio_manager.start_capture(device, callback=on_audio_chunk)
-                    await broadcast({"type": "speaker_added", "data": active_speakers[device.id]})
-                    logger.info(f"Hotplug: registered {name} (id={device.id})")
+                    if device.is_stereo:
+                        for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
+                            name = f"Speaker {len(active_speakers) + 1}"
+                            active_speakers[dev_id] = {
+                                "device_id": dev_id,
+                                "name": name,
+                                "serial": serial + suffix,
+                                "pw_node_name": device.pw_node_name,
+                                "mac": device.mac_address,
+                            }
+                            pipeline.register_speaker(dev_id, name)
+                            buffer_mgr.register_device(dev_id, serial + suffix)
+                            await broadcast({"type": "speaker_added", "data": active_speakers[dev_id]})
+                        await audio_manager.start_capture(device, callback=on_audio_chunk)
+                        logger.info(f"Hotplug: registered DJI stereo (id={device.id})")
+                    else:
+                        name = f"Speaker {len(active_speakers) + 1}"
+                        active_speakers[device.id] = {
+                            "device_id": device.id,
+                            "name": name,
+                            "serial": serial,
+                            "pw_node_name": device.pw_node_name,
+                            "mac": device.mac_address,
+                        }
+                        pipeline.register_speaker(device.id, name)
+                        buffer_mgr.register_device(device.id, serial)
+                        await audio_manager.start_capture(device, callback=on_audio_chunk)
+                        await broadcast({"type": "speaker_added", "data": active_speakers[device.id]})
+                        logger.info(f"Hotplug: registered {name} (id={device.id})")
         except Exception as e:
             logger.error(f"Hotplug scan error: {e}")
 

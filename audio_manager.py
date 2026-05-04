@@ -34,6 +34,8 @@ class AudioDevice:
     active: bool = False
     process: Optional[asyncio.subprocess.Process] = None
     callback: Optional[Callable] = None
+    is_stereo: bool = False          # True for DJI wireless receivers (L+R channels)
+    stereo_right_id: Optional[int] = None  # Virtual device ID for the R channel
 
 
 class PipeWireAudioManager:
@@ -96,12 +98,15 @@ class PipeWireAudioManager:
                 # Prefer Bluetooth devices, but also allow all sources for testing
                 is_bt = "bluez" in node_name.lower() or mac is not None
 
+                is_stereo = "wireless_mic_rx" in node_name.lower()
                 device = AudioDevice(
                     id=node_id,
                     name=nick,
                     pw_node_name=node_name,
                     mac_address=mac,
                     active=False,
+                    is_stereo=is_stereo,
+                    stereo_right_id=node_id + 10000 if is_stereo else None,
                 )
 
                 devices.append(device)
@@ -186,15 +191,17 @@ class PipeWireAudioManager:
     async def _capture_loop(self, device: AudioDevice) -> None:
         """
         Launch pw-record for a specific node and feed PCM chunks to the callback.
+        Stereo devices (DJI wireless receivers) split L/R into two virtual device IDs.
         Falls back to simulated white-noise audio if pw-record is unavailable.
         """
+        n_channels = 2 if device.is_stereo else CHANNELS
         cmd = [
             "pw-record",
             "--target", str(device.id),
             "--rate", str(SAMPLE_RATE),
-            "--channels", str(CHANNELS),
-            "--format", "s16",  # signed 16-bit little-endian
-            "-",                # write to stdout
+            "--channels", str(n_channels),
+            "--format", "s16",
+            "-",
         ]
 
         try:
@@ -204,13 +211,22 @@ class PipeWireAudioManager:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             device.process = process
-            bytes_per_chunk = CHUNK_SAMPLES * BYTES_PER_SAMPLE
+            bytes_per_chunk = CHUNK_SAMPLES * BYTES_PER_SAMPLE * n_channels
 
             while device.active:
                 raw = await process.stdout.readexactly(bytes_per_chunk)
-                pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-                if device.callback:
-                    await device.callback(device.id, pcm)
+                if device.is_stereo:
+                    interleaved = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                    left  = interleaved[0::2]
+                    right = interleaved[1::2]
+                    if device.callback:
+                        await device.callback(device.id, left)
+                        if device.stereo_right_id is not None:
+                            await device.callback(device.stereo_right_id, right)
+                else:
+                    pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                    if device.callback:
+                        await device.callback(device.id, pcm)
 
         except FileNotFoundError:
             logger.warning(f"pw-record unavailable — simulating audio for {device.name}")
@@ -253,4 +269,7 @@ class PipeWireAudioManager:
         return False
 
     def get_device(self, device_id: int) -> Optional[AudioDevice]:
-        return self.devices.get(device_id)
+        if device_id in self.devices:
+            return self.devices[device_id]
+        # Virtual right-channel ID → physical device
+        return self.devices.get(device_id - 10000)
