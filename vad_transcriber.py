@@ -91,15 +91,11 @@ class WhisperTranscriber:
     def _transcribe_sync(self, audio: np.ndarray, language: Optional[str] = None) -> Optional[TranscriptSegment]:
         segments, info = self.model.transcribe(
             audio,
-            language=language,
+            language=None,
             task="transcribe",
             beam_size=5,
-            vad_filter=True,
-            vad_parameters=dict(
-                threshold=0.1,
-                min_silence_duration_ms=150,
-                speech_pad_ms=600,
-            ),
+            vad_filter=False,
+            initial_prompt="Conversación en español e inglés.",
             temperature=0.0,
             no_speech_threshold=0.6,
             condition_on_previous_text=False,
@@ -108,11 +104,7 @@ class WhisperTranscriber:
         self.last_detected_language             = info.language
         self.last_detected_language_probability = info.language_probability
 
-        # Strict: only EN or ES, never anything else
-        if info.language not in ("en", "es"):
-            return None
-
-        # Low confidence — probably noise
+        # Reject if Whisper is very uncertain about the language
         if info.language_probability < 0.25:
             return None
 
@@ -121,7 +113,7 @@ class WhisperTranscriber:
             t              = seg.text.strip()
             avg_logprob    = getattr(seg, "avg_logprob", -1.0)
             no_speech_prob = getattr(seg, "no_speech_prob", 1.0)
-            if t and avg_logprob > -1.0 and no_speech_prob < 0.6:
+            if t and avg_logprob > -0.8 and no_speech_prob < 0.6:
                 texts.append(t)
                 total_logprob += avg_logprob
                 count         += 1
@@ -313,7 +305,7 @@ class VADTranscriptionPipeline:
             return
 
         current_lang = self._device_language.get(device_id)
-        segment = await whisper.transcribe(audio, language=current_lang)
+        segment = await whisper.transcribe(audio)
         buf.mark_transcribed(n_samples)
 
         # Language momentum — update after every chunk regardless of transcript result
