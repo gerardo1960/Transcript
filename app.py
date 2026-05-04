@@ -166,18 +166,16 @@ async def pipewire_watchdog():
     while True:
         await asyncio.sleep(10)
         try:
-            device_ids = list(active_speakers.keys())
-            if len(device_ids) < 2:
+            buffers = list(pipeline.buffer_mgr._buffers.values()) if pipeline.buffer_mgr else []
+            if len(buffers) < 2:
                 consecutive_fused = 0
                 continue
 
             energies = []
-            for did in device_ids:
-                buf = buffer_mgr.get_buffer(did)
-                if buf:
-                    pending = buf.get_pending()
-                    if pending is not None and len(pending) > 0:
-                        energies.append(float(np.sqrt(np.mean(pending ** 2))))
+            for buf in buffers:
+                if buf.chunks:
+                    audio = np.concatenate(buf.chunks[-5:])
+                    energies.append(float(np.sqrt(np.mean(audio ** 2))))
 
             if len(energies) < 2:
                 consecutive_fused = 0
@@ -339,6 +337,66 @@ async def clear_history(device_id: int):
     transcript_history.pop(device_id, None)
     await broadcast({"type": "history_cleared", "data": {"device_id": device_id}})
     return {"success": True}
+
+
+# ── Mic Controls ─────────────────────────────────────────────────────────────
+
+class GainRequest(BaseModel):
+    device_id: int
+    gain_pct: int   # 30-100
+
+class NoiseGateRequest(BaseModel):
+    device_id: int
+    value: float    # 0.001-0.1
+
+@app.post("/api/set_gain")
+async def set_gain(req: GainRequest):
+    """Set microphone input gain via PipeWire/pactl."""
+    import subprocess
+    device = audio_manager.get_device(req.device_id)
+    if not device:
+        return {"success": False, "error": "Device not found"}
+    gain = max(30, min(100, req.gain_pct))
+    try:
+        result = subprocess.run(
+            ["pactl", "set-source-volume", device.pw_node_name, f"{gain}%"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            logger.info(f"Device {req.device_id} gain set to {gain}%")
+            if req.device_id in active_speakers:
+                active_speakers[req.device_id]["gain_pct"] = gain
+            return {"success": True, "gain_pct": gain}
+        else:
+            return {"success": False, "error": result.stderr.strip()}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/set_noise_gate")
+async def set_noise_gate(req: NoiseGateRequest):
+    """Set per-device noise gate threshold."""
+    pipeline.set_noise_gate(req.device_id, req.value)
+    if req.device_id in active_speakers:
+        active_speakers[req.device_id]["noise_gate"] = req.value
+    return {"success": True, "value": req.value}
+
+@app.get("/api/get_gain/{device_id}")
+async def get_gain(device_id: int):
+    """Get current microphone gain from PipeWire."""
+    import subprocess, re
+    device = audio_manager.get_device(device_id)
+    if not device:
+        return {"success": False, "error": "Device not found"}
+    try:
+        result = subprocess.run(
+            ["pactl", "get-source-volume", device.pw_node_name],
+            capture_output=True, text=True
+        )
+        m = re.search(r'(\d+)%', result.stdout)
+        gain = int(m.group(1)) if m else 100
+        return {"success": True, "gain_pct": gain}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────

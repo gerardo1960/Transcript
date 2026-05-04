@@ -701,7 +701,7 @@
           <span class="speaker-name" id="name-${sp.device_id}"
                 ondblclick="startRename(${sp.device_id})"
                 title="Double-tap to rename">${sp.name}</span>
-          <span style="font-family:var(--font-mono);font-size:16px;color:var(--speaker-color);margin-left:6px;opacity:0.9;font-weight:600" title="Serial">#${sp.serial || sp.device_id}</span>
+          <span style="font-family:var(--font-mono);font-size:14px;color:var(--speaker-color);margin-left:4px;opacity:0.8" title="Serial">#${sp.serial || sp.device_id}</span>
           <span class="lang-tag" id="lang-${sp.device_id}">—</span>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
@@ -718,6 +718,24 @@
         <div class="empty-state" id="empty-${sp.device_id}">
           <div class="empty-icon">🎙</div>
           <div class="empty-text">Waiting for speech…</div>
+        </div>
+      </div>
+      <div class="mic-controls">
+        <div class="mic-control-row">
+          <label>🎙 Ganancia</label>
+          <input type="range" min="30" max="100" value="70"
+            oninput="updateGain(${sp.device_id}, this.value)"
+            onchange="setGain(${sp.device_id}, this.value)"
+            id="gain-${sp.device_id}" />
+          <span class="mic-control-val" id="gain-val-${sp.device_id}">70%</span>
+        </div>
+        <div class="mic-control-row">
+          <label>🔇 Umbral ruido</label>
+          <input type="range" min="1" max="50" value="10"
+            oninput="updateGate(${sp.device_id}, this.value)"
+            onchange="setGate(${sp.device_id}, this.value)"
+            id="gate-${sp.device_id}" />
+          <span class="mic-control-val" id="gate-val-${sp.device_id}">0.010</span>
         </div>
       </div>
       <div class="waveform-bar">
