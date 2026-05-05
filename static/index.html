@@ -1112,8 +1112,19 @@
 
     const commit = async () => {
       savedList?.remove();
+      savedList = null;
       const newName = input.value.trim() || current;
       saveNameToList(newName);
+
+      // Restore the span immediately so subsequent renames work
+      const newSpan = document.createElement('span');
+      newSpan.className = 'speaker-name';
+      newSpan.id        = `name-${deviceId}`;
+      newSpan.textContent = newName;
+      newSpan.title     = 'Tap to edit name';
+      newSpan.onclick   = (e) => showNameMenu(deviceId, e);
+      input.replaceWith(newSpan);
+
       try {
         await fetch('/api/rename', {
           method: 'POST',
