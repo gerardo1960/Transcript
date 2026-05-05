@@ -19,11 +19,12 @@ from audio_recorder import AudioBufferManager
 
 logger = logging.getLogger(__name__)
 
-SAMPLE_RATE     = 16000
-FLUSH_INTERVAL  = 0.5
-MIN_AUDIO_SECS  = 1.0
-PRE_ROLL_SECS   = 0.8
-MIN_ENERGY      = 0.002
+SAMPLE_RATE              = 16000
+FLUSH_INTERVAL           = 0.5
+MIN_AUDIO_SECS           = 2.5
+PRE_ROLL_SECS            = 0.8
+MIN_ENERGY               = 0.002
+SILENCE_ADVANCE_AFTER    = 6   # consecutive silent ticks before advancing cursor (~3s)
 
 NUM_POOLS       = 5
 EXCLUSIVE_SLOTS = 4   # pools 0-3
@@ -361,8 +362,9 @@ class VADTranscriptionPipeline:
                 self._device_active[device_id] = False
                 if self.on_device_inactive:
                     asyncio.ensure_future(self.on_device_inactive(device_id))
-            pre_roll = int(PRE_ROLL_SECS * SAMPLE_RATE)
-            buf.mark_transcribed(max(0, len(audio) - pre_roll))
+            if streak >= SILENCE_ADVANCE_AFTER:
+                pre_roll = int(PRE_ROLL_SECS * SAMPLE_RATE)
+                buf.mark_transcribed(max(0, len(audio) - pre_roll))
             return True
 
         self._silence_streak[device_id] = 0
