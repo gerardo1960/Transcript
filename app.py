@@ -40,6 +40,8 @@ WHISPER_MODEL = "large-v3"
 CUDA_DEVICE   = "cuda"
 COMPUTE_TYPE  = "int8"
 MAX_TRANSCRIPT_HISTORY = 50
+DEFAULT_GAIN_PCT   = 90
+DEFAULT_NOISE_GATE = 0.020
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Multi-Speaker Transcription API", version="1.0.0")
@@ -104,6 +106,18 @@ async def on_audio_chunk(device_id: int, pcm: np.ndarray) -> None:
     buffer_mgr.add_chunk(device_id, pcm)
 
 
+def _apply_gain(device, gain_pct: int):
+    """Apply gain to a PipeWire device via pactl (best-effort, non-blocking)."""
+    import subprocess
+    try:
+        subprocess.run(
+            ["pactl", "set-source-volume", device.pw_node_name, f"{gain_pct}%"],
+            capture_output=True, timeout=3,
+        )
+    except Exception:
+        pass
+
+
 # ── Startup / Shutdown ────────────────────────────────────────────────────────
 
 @app.on_event("startup")
@@ -147,11 +161,15 @@ async def startup():
                     "serial": serial + suffix,
                     "pw_node_name": device.pw_node_name,
                     "mac": device.mac_address,
+                    "gain_pct": DEFAULT_GAIN_PCT,
+                    "noise_gate": DEFAULT_NOISE_GATE,
                 }
                 pipeline.register_speaker(dev_id, name)
+                pipeline.set_noise_gate(dev_id, DEFAULT_NOISE_GATE)
                 buffer_mgr.register_device(dev_id, serial + suffix)
                 name_idx += 1
             await audio_manager.start_capture(device, callback=on_audio_chunk)
+            _apply_gain(device, DEFAULT_GAIN_PCT)
         else:
             name = default_names[name_idx]
             active_speakers[device.id] = {
@@ -160,10 +178,14 @@ async def startup():
                 "serial": serial,
                 "pw_node_name": device.pw_node_name,
                 "mac": device.mac_address,
+                "gain_pct": DEFAULT_GAIN_PCT,
+                "noise_gate": DEFAULT_NOISE_GATE,
             }
             pipeline.register_speaker(device.id, name)
+            pipeline.set_noise_gate(device.id, DEFAULT_NOISE_GATE)
             buffer_mgr.register_device(device.id, serial)
             await audio_manager.start_capture(device, callback=on_audio_chunk)
+            _apply_gain(device, DEFAULT_GAIN_PCT)
             name_idx += 1
 
     pipeline.buffer_mgr = buffer_mgr
@@ -394,11 +416,11 @@ async def clear_history(device_id: int):
 
 class GainRequest(BaseModel):
     device_id: int
-    gain_pct: int   # 30-100
+    gain_pct: int
 
 class NoiseGateRequest(BaseModel):
     device_id: int
-    value: float    # 0.001-0.1
+    value: float    # 0.001-0.5
 
 @app.post("/api/set_gain")
 async def set_gain(req: GainRequest):

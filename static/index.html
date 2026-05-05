@@ -471,6 +471,81 @@
       margin-bottom: 8px;
     }
 
+    .profile-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .profile-item-name {
+      flex: 1;
+      min-width: 0;
+    }
+    .profile-item-name strong {
+      display: block;
+      font-size: 13px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .profile-item-name span {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    .profile-btn-apply {
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .profile-btn-delete {
+      padding: 4px 8px;
+      font-size: 13px;
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .profile-btn-delete:hover { color: #ff5555; border-color: #ff5555; }
+    .profile-save-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .profile-name-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      padding: 6px 10px;
+      outline: none;
+    }
+    .profile-name-input:focus { border-color: var(--accent); }
+    .profile-save-btn {
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .profile-save-btn:hover { border-color: var(--accent); color: var(--accent); }
+
     .device-list {
       display: flex;
       flex-direction: column;
@@ -674,6 +749,22 @@
       </label>
     </div>
 
+    <div>
+      <div class="drawer-section-title">Perfiles de configuración</div>
+      <div id="profile-list" style="display:flex;flex-direction:column;gap:6px;min-height:28px">
+        <div style="color:var(--text-dim);font-size:12px">Sin perfiles guardados.</div>
+      </div>
+      <div class="profile-save-row">
+        <input type="text" id="profile-name-input" class="profile-name-input"
+               placeholder="Nombre del perfil…"
+               onkeydown="if(event.key==='Enter') saveCurrentProfile()" />
+        <button class="profile-save-btn" onclick="saveCurrentProfile()">Guardar actual</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:6px;line-height:1.5">
+        Guarda ganancia, umbral de ruido y tamaño de letra.
+      </div>
+    </div>
+
     <button class="drawer-close" onclick="closeSettings()">Close</button>
   </div>
 </div>
@@ -686,6 +777,7 @@
   const SPEAKER_COLORS = ['var(--sp0)', 'var(--sp1)', 'var(--sp2)', 'var(--sp3)'];
   const SPEAKER_INITIALS = {};    // device_id → initial letter
   const SPEAKER_INDEX = {};       // device_id → color index
+  const DEVICE_SERIALS = {};      // device_id → serial (stable across reboots)
   let speakerOrder = [];          // ordered device IDs
   let autoScroll = true;
   let ws = null;
@@ -763,6 +855,7 @@
     speakers.forEach((sp, i) => {
       SPEAKER_INDEX[sp.device_id] = i % 4;
       SPEAKER_INITIALS[sp.device_id] = (sp.name || 'S')[0].toUpperCase();
+      DEVICE_SERIALS[sp.device_id] = sp.serial || String(sp.device_id);
       speakerOrder.push(sp.device_id);
       grid.appendChild(buildPanel(sp));
     });
@@ -786,6 +879,7 @@
     const idx = speakerOrder.length % 4;
     SPEAKER_INDEX[sp.device_id] = idx;
     SPEAKER_INITIALS[sp.device_id] = (sp.name || 'S')[0].toUpperCase();
+    DEVICE_SERIALS[sp.device_id] = sp.serial || String(sp.device_id);
     speakerOrder.push(sp.device_id);
     document.getElementById('grid').appendChild(buildPanel(sp));
     updateGridLayout();
@@ -812,8 +906,8 @@
     const colorIdx = SPEAKER_INDEX[sp.device_id] ?? 0;
     const color = SPEAKER_COLORS[colorIdx];
     const initial = (sp.name || 'S')[0].toUpperCase();
-    const gainPct  = sp.gain_pct   || 30;
-    const gateRaw  = sp.noise_gate ? Math.round(sp.noise_gate * 1000) : 10;
+    const gainPct  = sp.gain_pct   ?? 90;
+    const gateRaw  = sp.noise_gate ? Math.round(sp.noise_gate * 1000) : 20;
     const gateDisplay = (gateRaw / 1000).toFixed(3);
 
     const div = document.createElement('div');
@@ -859,7 +953,7 @@
         </div>
         <div class="mic-control-row">
           <label>🔇 Umbral ruido</label>
-          <input type="range" min="1" max="50" value="${gateRaw}"
+          <input type="range" min="1" max="400" value="${gateRaw}"
             oninput="updateGate(${sp.device_id}, this.value)"
             onchange="setGate(${sp.device_id}, this.value)"
             id="gate-${sp.device_id}" />
@@ -1171,6 +1265,7 @@
   function openSettings() {
     loadDeviceList();
     loadPoolAssignment();
+    renderProfiles();
     document.getElementById('settings-overlay').classList.add('open');
   }
 
@@ -1325,6 +1420,122 @@
         body: JSON.stringify({device_id: deviceId, value: f}),
       });
     } catch (e) { console.error('setGate failed', e); }
+  }
+
+  // ── Profiles ───────────────────────────────────────────────────────────
+  function getProfiles() {
+    try { return JSON.parse(localStorage.getItem('tx_profiles') || '[]'); }
+    catch { return []; }
+  }
+  function _saveProfiles(arr) {
+    localStorage.setItem('tx_profiles', JSON.stringify(arr));
+  }
+
+  function renderProfiles() {
+    const list = document.getElementById('profile-list');
+    if (!list) return;
+    const profiles = getProfiles();
+    if (!profiles.length) {
+      list.innerHTML = '<div style="color:var(--text-dim);font-size:12px">Sin perfiles guardados.</div>';
+      return;
+    }
+    list.innerHTML = profiles.map((p, i) => {
+      const mics  = Object.keys(p.devices || {}).length;
+      const label = Object.entries(p.devices || {}).map(([serial, s]) =>
+        `${serial}: G${s.gain_pct}% U${s.noise_gate.toFixed(3)}`
+      ).join(' · ');
+      const fontInfo = p.font_size ? ` · ${p.font_size}px` : '';
+      const subtitle = mics
+        ? (label.length > 55 ? label.substring(0, 55) + '…' : label) + fontInfo
+        : `sin mics${fontInfo}`;
+      return `
+        <div class="profile-item">
+          <div class="profile-item-name">
+            <strong>${escapeHTML(p.name)}</strong>
+            <span title="${escapeHTML(label + fontInfo)}">${escapeHTML(subtitle)}</span>
+          </div>
+          <button class="profile-btn-apply" onclick="applyProfile(${i})">Aplicar</button>
+          <button class="profile-btn-delete" onclick="deleteProfile(${i})" title="Eliminar perfil">🗑</button>
+        </div>`;
+    }).join('');
+  }
+
+  function saveCurrentProfile() {
+    const name = document.getElementById('profile-name-input').value.trim();
+    if (!name) { showToast('Escribe un nombre para el perfil'); return; }
+
+    const devices = {};
+    Object.entries(DEVICE_SERIALS).forEach(([devId, serial]) => {
+      const gainEl = document.getElementById(`gain-${devId}`);
+      const gateEl = document.getElementById(`gate-${devId}`);
+      if (!gainEl || !gateEl) return;
+      devices[serial] = {
+        gain_pct:   parseInt(gainEl.value),
+        noise_gate: parseInt(gateEl.value) / 1000,
+      };
+    });
+
+    const fontSlider = document.getElementById('font-slider');
+    const font_size  = fontSlider ? parseInt(fontSlider.value) : 13;
+
+    const profiles = getProfiles();
+    const existing = profiles.findIndex(p => p.name === name);
+    const profile  = { name, devices, font_size, savedAt: Date.now() };
+    if (existing >= 0) profiles[existing] = profile;
+    else profiles.push(profile);
+    _saveProfiles(profiles);
+
+    document.getElementById('profile-name-input').value = '';
+    renderProfiles();
+    const micCount = Object.keys(devices).length;
+    showToast(`Perfil "${name}" guardado (${micCount} mic${micCount !== 1 ? 's' : ''}, fuente ${font_size}px)`);
+  }
+
+  async function applyProfile(idx) {
+    const profiles = getProfiles();
+    const profile  = profiles[idx];
+    if (!profile) return;
+
+    // Font size
+    if (profile.font_size) {
+      const fontSlider = document.getElementById('font-slider');
+      if (fontSlider) { fontSlider.value = profile.font_size; changeFontSize(profile.font_size); }
+    }
+
+    const serialToDevice = {};
+    Object.entries(DEVICE_SERIALS).forEach(([devId, serial]) => {
+      serialToDevice[serial] = parseInt(devId);
+    });
+
+    let applied = 0;
+    for (const [serial, settings] of Object.entries(profile.devices || {})) {
+      const devId = serialToDevice[serial];
+      if (devId === undefined) continue;
+      const gainSlider = document.getElementById(`gain-${devId}`);
+      const gateSlider = document.getElementById(`gate-${devId}`);
+      const gateRaw = Math.round(settings.noise_gate * 1000);
+      if (gainSlider) gainSlider.value = settings.gain_pct;
+      if (gateSlider) gateSlider.value = gateRaw;
+      await setGain(devId, settings.gain_pct);
+      await setGate(devId, gateRaw);
+      applied++;
+    }
+    const fontMsg = profile.font_size ? `, fuente ${profile.font_size}px` : '';
+    showToast(applied
+      ? `Perfil "${profile.name}" aplicado (${applied} mic${applied !== 1 ? 's' : ''}${fontMsg})`
+      : `Perfil "${profile.name}": ningún mic conectado coincide`
+    );
+  }
+
+  function deleteProfile(idx) {
+    const profiles = getProfiles();
+    const name = profiles[idx]?.name;
+    if (!name) return;
+    if (!confirm(`¿Eliminar el perfil "${name}"?`)) return;
+    profiles.splice(idx, 1);
+    _saveProfiles(profiles);
+    renderProfiles();
+    showToast(`Perfil "${name}" eliminado`);
   }
 
   // ── Utils ──────────────────────────────────────────────────────────────

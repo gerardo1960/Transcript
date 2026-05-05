@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_RATE              = 16000
 FLUSH_INTERVAL           = 0.5
-MIN_AUDIO_SECS           = 2.5
+MIN_AUDIO_SECS           = 2.0   # minimum audio before considering transcription
 PRE_ROLL_SECS            = 0.8
 MIN_ENERGY               = 0.002
-SILENCE_ADVANCE_AFTER    = 6   # consecutive silent ticks before advancing cursor (~3s)
+SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~3s)
+TAIL_SILENCE_SECS        = 0.5  # tail silence in pending audio → phrase boundary
+MAX_WAIT_SECS            = 5.0  # force transcription if no phrase boundary for this long
 
 NUM_POOLS       = 5
 EXCLUSIVE_SLOTS = 4   # pools 0-3
@@ -218,6 +220,8 @@ class VADTranscriptionPipeline:
         self._device_language: Dict[int, Optional[str]] = {}
         self._language_streak: Dict[int, int]           = {}
 
+        self._last_tx_time: Dict[int, float] = {}
+
         self.buffer_mgr:         Optional[AudioBufferManager] = None
         self.on_transcript:      Optional[Callable]           = None
         self.on_device_inactive: Optional[Callable]           = None
@@ -256,6 +260,7 @@ class VADTranscriptionPipeline:
         self._noise_gate[device_id]      = MIN_ENERGY
         self._device_language[device_id] = None
         self._language_streak[device_id] = 0
+        self._last_tx_time[device_id]    = time.time()
 
         # Fill first available exclusive slot; otherwise shared
         for slot_idx in range(EXCLUSIVE_SLOTS):
@@ -280,14 +285,15 @@ class VADTranscriptionPipeline:
             if task := self._exclusive_flush_tasks.pop(device_id, None):
                 task.cancel()
         for d in (self._speaker_names, self._device_active, self._silence_streak,
-                  self._noise_gate, self._device_language, self._language_streak):
+                  self._noise_gate, self._device_language, self._language_streak,
+                  self._last_tx_time):
             d.pop(device_id, None)
 
     def update_speaker_name(self, device_id: int, name: str) -> None:
         self._speaker_names[device_id] = name
 
     def set_noise_gate(self, device_id: int, value: float) -> None:
-        self._noise_gate[device_id] = max(0.001, min(0.1, value))
+        self._noise_gate[device_id] = max(0.001, min(0.5, value))
         logger.info(f"Device {device_id} noise gate → {value:.4f}")
 
     # ── Pool assignment (called from API) ─────────────────────────────────
@@ -395,7 +401,18 @@ class VADTranscriptionPipeline:
             if audio is None or len(audio) < int(MIN_AUDIO_SECS * SAMPLE_RATE):
                 continue
             if self._handle_silence(device_id, audio, buf):
+                self._last_tx_time[device_id] = time.time()  # reset timer during silence
                 continue
+
+            # Only transcribe at a phrase boundary or when forced by timer
+            tail = audio[-int(TAIL_SILENCE_SECS * SAMPLE_RATE):]
+            tail_rms = float(np.sqrt(np.mean(tail ** 2)))
+            threshold = self._noise_gate.get(device_id, MIN_ENERGY)
+            at_boundary = tail_rms < threshold
+            force = (time.time() - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
+            if not at_boundary and not force:
+                continue
+
             if whisper._busy:
                 continue
             asyncio.ensure_future(self._transcribe_and_emit(
@@ -424,7 +441,17 @@ class VADTranscriptionPipeline:
                 if audio is None or len(audio) < int(MIN_AUDIO_SECS * SAMPLE_RATE):
                     continue
                 if self._handle_silence(device_id, audio, buf):
+                    self._last_tx_time[device_id] = time.time()
                     continue
+
+                tail = audio[-int(TAIL_SILENCE_SECS * SAMPLE_RATE):]
+                tail_rms = float(np.sqrt(np.mean(tail ** 2)))
+                threshold = self._noise_gate.get(device_id, MIN_ENERGY)
+                at_boundary = tail_rms < threshold
+                force = (time.time() - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
+                if not at_boundary and not force:
+                    continue
+
                 if whisper._busy:
                     break  # come back next tick
                 rr_index = (rr_index + i + 1) % n
@@ -440,6 +467,7 @@ class VADTranscriptionPipeline:
         logger.info(f"dev={device_id} → Whisper pool={pool_idx} audio={n_samples/SAMPLE_RATE:.2f}s")
         segment  = await whisper.transcribe(audio)
         buf.mark_transcribed(n_samples)
+        self._last_tx_time[device_id] = time.time()
 
         # Language momentum (informational only — never force)
         detected      = whisper.last_detected_language
