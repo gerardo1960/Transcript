@@ -541,6 +541,68 @@
     }
     #toast.show { transform: translateX(-50%) translateY(0); }
 
+    /* ─── Name context menu ─────────────────────────────────────────────── */
+    .name-menu {
+      position: fixed;
+      z-index: 200;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 160px;
+    }
+    .name-menu-btn {
+      padding: 11px 16px;
+      font-size: 13px;
+      font-family: var(--font-ui);
+      background: none;
+      border: none;
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+      transition: background var(--transition);
+    }
+    .name-menu-btn:hover { background: var(--border); }
+    .name-menu-btn.danger { color: var(--sp2); }
+
+    /* ─── Saved names dropdown ───────────────────────────────────────────── */
+    .saved-names-list {
+      position: fixed;
+      z-index: 210;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      max-height: 220px;
+      overflow-y: auto;
+      min-width: 180px;
+    }
+    .saved-names-list::-webkit-scrollbar { width: 4px; }
+    .saved-names-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .saved-name-item {
+      display: flex;
+      align-items: center;
+      padding: 9px 12px;
+      gap: 8px;
+      cursor: pointer;
+      transition: background var(--transition);
+      font-size: 13px;
+    }
+    .saved-name-item:hover { background: var(--border); }
+    .saved-name-item .name-txt { flex: 1; }
+    .saved-name-del {
+      color: var(--text-dim);
+      font-size: 16px;
+      line-height: 1;
+      padding: 0 4px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .saved-name-del:hover { color: var(--sp2); background: rgba(255,112,67,0.15); }
+
     /* ─── Responsive ─────────────────────────────────────────────────── */
     @media (max-width: 600px) {
       #grid[data-count="2"],
@@ -764,8 +826,8 @@
         <div class="speaker-name-wrap">
           <div class="speaker-avatar" id="avatar-${sp.device_id}">${initial}</div>
           <span class="speaker-name" id="name-${sp.device_id}"
-                ondblclick="startRename(${sp.device_id})"
-                title="Double-tap to rename">${sp.name}</span>
+                onclick="showNameMenu(${sp.device_id}, event)"
+                title="Tap to edit name">${sp.name}</span>
           <span style="font-family:var(--font-mono);font-size:14px;color:var(--speaker-color);margin-left:4px;opacity:0.8" title="Serial">#${sp.serial || sp.device_id}</span>
           <span class="lang-tag" id="lang-${sp.device_id}">—</span>
         </div>
@@ -910,13 +972,85 @@
 
   // ── Grid Layout ────────────────────────────────────────────────────────
   function updateGridLayout() {
-    const count = Math.min(speakerOrder.length, 4);
-    document.getElementById('grid').dataset.count = count || '0';
+    document.getElementById('grid').dataset.count = speakerOrder.length || '0';
   }
 
   function updateSpeakerBadge() {
     document.getElementById('speaker-badge').textContent =
       `${speakerOrder.length} speaker${speakerOrder.length !== 1 ? 's' : ''}`;
+  }
+
+  // ── Saved names (localStorage) ─────────────────────────────────────────
+  const SAVED_NAMES_KEY = 'transcript_saved_names';
+
+  function getSavedNames() {
+    try { return JSON.parse(localStorage.getItem(SAVED_NAMES_KEY) || '[]'); }
+    catch { return []; }
+  }
+
+  function saveNameToList(name) {
+    if (!name || /^Speaker \d+$/.test(name)) return;
+    const names = getSavedNames().filter(n => n !== name);
+    names.unshift(name);
+    localStorage.setItem(SAVED_NAMES_KEY, JSON.stringify(names.slice(0, 30)));
+  }
+
+  function deleteNameFromList(name) {
+    const names = getSavedNames().filter(n => n !== name);
+    localStorage.setItem(SAVED_NAMES_KEY, JSON.stringify(names));
+  }
+
+  // ── Name context menu ───────────────────────────────────────────────────
+  function closeAllMenus() {
+    document.querySelectorAll('.name-menu, .saved-names-list').forEach(el => el.remove());
+  }
+
+  function showNameMenu(deviceId, event) {
+    event.stopPropagation();
+    closeAllMenus();
+
+    const nameEl = document.getElementById(`name-${deviceId}`);
+    const rect   = nameEl.getBoundingClientRect();
+
+    const menu = document.createElement('div');
+    menu.className = 'name-menu';
+    menu.style.top  = (rect.bottom + 6) + 'px';
+    menu.style.left = rect.left + 'px';
+
+    const mkBtn = (label, fn, cls) => {
+      const b = document.createElement('button');
+      b.className = 'name-menu-btn' + (cls ? ' ' + cls : '');
+      b.textContent = label;
+      b.onclick = (e) => { e.stopPropagation(); closeAllMenus(); fn(); };
+      return b;
+    };
+
+    const currentName = nameEl.textContent.trim();
+    menu.appendChild(mkBtn('✏  Editar',  () => startRename(deviceId)));
+    menu.appendChild(mkBtn('★  Guardar nombre', () => {
+      saveNameToList(currentName);
+      showToast(`"${currentName}" guardado`);
+    }));
+    menu.appendChild(mkBtn('↩  Resetear', () => resetName(deviceId), 'danger'));
+
+    document.body.appendChild(menu);
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.name-menu, .saved-names-list, .speaker-name, .name-input')) return;
+    closeAllMenus();
+  });
+
+  async function resetName(deviceId) {
+    const idx = speakerOrder.indexOf(deviceId);
+    const defaultName = `Speaker ${idx + 1}`;
+    try {
+      await fetch('/api/rename', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({device_id: deviceId, new_name: defaultName}),
+      });
+    } catch(e) { console.error('Reset failed', e); }
   }
 
   // ── Rename ─────────────────────────────────────────────────────────────
@@ -930,28 +1064,68 @@
     input.className = 'name-input';
     input.value = current;
     input.style.setProperty('--speaker-color', SPEAKER_COLORS[SPEAKER_INDEX[deviceId] ?? 0]);
-
     nameEl.replaceWith(input);
     input.focus();
     input.select();
 
+    // Saved names dropdown
+    const saved = getSavedNames();
+    let savedList = null;
+    if (saved.length > 0) {
+      savedList = document.createElement('div');
+      savedList.className = 'saved-names-list';
+      const inputRect = input.getBoundingClientRect();
+      savedList.style.top      = (inputRect.bottom + 4) + 'px';
+      savedList.style.left     = inputRect.left + 'px';
+      savedList.style.minWidth = Math.max(inputRect.width, 180) + 'px';
+
+      // Prevent the list from causing input blur on both mouse and touch
+      savedList.addEventListener('mousedown', (e) => e.preventDefault());
+      savedList.addEventListener('touchstart', (e) => e.preventDefault(), {passive: false});
+
+      saved.forEach(name => {
+        const item = document.createElement('div');
+        item.className = 'saved-name-item';
+
+        const txt = document.createElement('span');
+        txt.className = 'name-txt';
+        txt.textContent = name;
+        txt.onclick = () => { input.value = name; savedList.remove(); savedList = null; input.blur(); };
+
+        const del = document.createElement('span');
+        del.className = 'saved-name-del';
+        del.textContent = '×';
+        del.onclick = (e) => {
+          e.stopPropagation();
+          deleteNameFromList(name);
+          item.remove();
+          if (!savedList.querySelector('.saved-name-item')) { savedList.remove(); savedList = null; }
+        };
+
+        item.appendChild(txt);
+        item.appendChild(del);
+        savedList.appendChild(item);
+      });
+
+      document.body.appendChild(savedList);
+    }
+
     const commit = async () => {
+      savedList?.remove();
       const newName = input.value.trim() || current;
+      saveNameToList(newName);
       try {
         await fetch('/api/rename', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({device_id: deviceId, new_name: newName}),
         });
-      } catch (e) {
-        console.error('Rename failed', e);
-      }
-      // The server broadcasts speaker_renamed → renameSpeakerPanel()
+      } catch(e) { console.error('Rename failed', e); }
     };
 
     input.onblur = commit;
     input.onkeydown = (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
       if (e.key === 'Escape') { input.value = current; input.blur(); }
     };
   }

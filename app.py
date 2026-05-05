@@ -335,15 +335,14 @@ class RenameRequest(BaseModel):
 
 @app.post("/api/rename")
 async def rename_speaker(req: RenameRequest):
-    success = await audio_manager.rename_device(req.device_id, req.new_name)
-    if success:
-        pipeline.update_speaker_name(req.device_id, req.new_name)
-        # buffer_mgr handles names via pipeline
-        if req.device_id in active_speakers:
-            active_speakers[req.device_id]["name"] = req.new_name
-        await broadcast({"type": "speaker_renamed",
-                         "data": {"device_id": req.device_id, "name": req.new_name}})
-    return {"success": success}
+    if req.device_id not in active_speakers:
+        return {"success": False, "error": "Speaker not found"}
+    await audio_manager.rename_device(req.device_id, req.new_name)  # best-effort
+    pipeline.update_speaker_name(req.device_id, req.new_name)
+    active_speakers[req.device_id]["name"] = req.new_name
+    await broadcast({"type": "speaker_renamed",
+                     "data": {"device_id": req.device_id, "name": req.new_name}})
+    return {"success": True}
 
 
 class AddSpeakerRequest(BaseModel):
