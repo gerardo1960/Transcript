@@ -103,6 +103,7 @@ class WhisperTranscriber:
             temperature=0.0,
             no_speech_threshold=0.6,
             condition_on_previous_text=False,
+            initial_prompt=" ",
         )
 
         self.last_detected_language             = info.language
@@ -364,7 +365,12 @@ class VADTranscriptionPipeline:
                     asyncio.ensure_future(self.on_device_inactive(device_id))
             if streak >= SILENCE_ADVANCE_AFTER:
                 pre_roll = int(PRE_ROLL_SECS * SAMPLE_RATE)
-                buf.mark_transcribed(max(0, len(audio) - pre_roll))
+                advance = max(0, len(audio) - pre_roll)
+                buf.mark_transcribed(advance)
+                logger.debug(
+                    f"dev={device_id} silence streak={streak} rms={rms:.4f} "
+                    f"pending={len(audio)/SAMPLE_RATE:.2f}s advance={advance/SAMPLE_RATE:.2f}s"
+                )
             return True
 
         self._silence_streak[device_id] = 0
@@ -431,6 +437,7 @@ class VADTranscriptionPipeline:
 
     async def _transcribe_and_emit(self, audio, n_samples, device_id, speaker_name, buf, pool_idx):
         whisper  = self._pools[pool_idx]
+        logger.info(f"dev={device_id} → Whisper pool={pool_idx} audio={n_samples/SAMPLE_RATE:.2f}s")
         segment  = await whisper.transcribe(audio)
         buf.mark_transcribed(n_samples)
 
@@ -454,6 +461,10 @@ class VADTranscriptionPipeline:
                     self._device_language[device_id] = detected
                     self._language_streak[device_id] = 0
 
+        lang  = whisper.last_detected_language
+        prob  = whisper.last_detected_language_probability
+        text  = segment.text if segment else None
+        logger.info(f"dev={device_id} lang={lang}({prob:.2f}) → {repr(text)}")
         if segment and segment.text.strip():
             segment.device_id    = device_id
             segment.speaker_name = speaker_name

@@ -28,6 +28,10 @@ from audio_recorder import AudioBufferManager
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("server.log", mode="a", encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger(__name__)
 
