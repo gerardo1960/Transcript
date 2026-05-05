@@ -9,7 +9,9 @@ Pool assignments are dynamic and controllable via API at runtime.
 
 import asyncio
 import logging
+import re
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
@@ -31,6 +33,24 @@ MAX_WAIT_SECS            = 5.0  # force transcription if no phrase boundary for 
 NUM_POOLS       = 5
 EXCLUSIVE_SLOTS = 4   # pools 0-3
 SHARED_POOL     = 4   # pool 4
+
+
+def _looks_like_hallucination(text: str) -> bool:
+    """Catch repetitive / counting hallucinations that Whisper produces on near-silent audio."""
+    words = text.split()
+    if len(words) < 4:
+        return False
+    tokens = [re.sub(r"[.,!?;:\-]", "", w).lower() for w in words]
+    # Same token dominates (e.g. repeated phrase)
+    counts = Counter(tokens)
+    top_count = counts.most_common(1)[0][1]
+    if top_count / len(tokens) > 0.25:
+        return True
+    # Mostly numbers → counting hallucination ("1, 2, 3, 4, 5...")
+    number_tokens = sum(1 for t in tokens if re.fullmatch(r"\d+", t))
+    if number_tokens / len(tokens) > 0.35:
+        return True
+    return False
 
 
 @dataclass
@@ -170,6 +190,9 @@ class WhisperTranscriber:
         }
         full_text = " ".join(texts).strip()
         if full_text.lower() in HALLUCINATIONS:
+            return None
+        if _looks_like_hallucination(full_text):
+            logger.info(f"Discarded repetitive hallucination: {repr(full_text[:80])}")
             return None
 
         return TranscriptSegment(
