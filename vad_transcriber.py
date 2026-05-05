@@ -28,7 +28,7 @@ PRE_ROLL_SECS            = 0.8
 MIN_ENERGY               = 0.002
 SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~3s)
 TAIL_SILENCE_SECS        = 0.5  # tail silence in pending audio → phrase boundary
-MAX_WAIT_SECS            = 5.0  # force transcription if no phrase boundary for this long
+MAX_WAIT_SECS            = 3.0  # force transcription if no phrase boundary for this long
 
 NUM_POOLS       = 5
 EXCLUSIVE_SLOTS = 4   # pools 0-3
@@ -382,32 +382,43 @@ class VADTranscriptionPipeline:
     # ── Internal helpers ──────────────────────────────────────────────────
 
     def _handle_silence(self, device_id: int, audio: np.ndarray, buf) -> bool:
-        """Returns True if audio is below noise gate (caller should skip transcription)."""
-        rms = float(np.sqrt(np.mean(audio ** 2)))
-        threshold = self._noise_gate.get(device_id, MIN_ENERGY)
-        if rms < threshold:
-            streak = self._silence_streak.get(device_id, 0) + 1
-            self._silence_streak[device_id] = streak
-            if streak >= 60 and self._device_active.get(device_id, True):
-                self._device_active[device_id] = False
-                if self.on_device_inactive:
-                    asyncio.ensure_future(self.on_device_inactive(device_id))
-            if streak >= SILENCE_ADVANCE_AFTER:
-                pre_roll = int(PRE_ROLL_SECS * SAMPLE_RATE)
-                advance = max(0, len(audio) - pre_roll)
-                buf.mark_transcribed(advance)
-                logger.debug(
-                    f"dev={device_id} silence streak={streak} rms={rms:.4f} "
-                    f"pending={len(audio)/SAMPLE_RATE:.2f}s advance={advance/SAMPLE_RATE:.2f}s"
-                )
-            return True
+        """Returns True only when the entire buffer (body + tail) is silent.
 
-        self._silence_streak[device_id] = 0
-        if not self._device_active.get(device_id, True):
-            self._device_active[device_id] = True
-            if self.on_device_active:
-                asyncio.ensure_future(self.on_device_active(device_id))
-        return False
+        Splitting body/tail prevents short words followed by silence (e.g. "bella"
+        after a pause) from being classified as silence and discarded.
+        """
+        threshold = self._noise_gate.get(device_id, MIN_ENERGY)
+        tail_n = int(TAIL_SILENCE_SECS * SAMPLE_RATE)
+        if len(audio) > tail_n:
+            body_rms = float(np.sqrt(np.mean(audio[:-tail_n] ** 2)))
+            tail_rms = float(np.sqrt(np.mean(audio[-tail_n:] ** 2)))
+        else:
+            body_rms = tail_rms = float(np.sqrt(np.mean(audio ** 2)))
+
+        if body_rms >= threshold or tail_rms >= threshold:
+            self._silence_streak[device_id] = 0
+            if not self._device_active.get(device_id, True):
+                self._device_active[device_id] = True
+                if self.on_device_active:
+                    asyncio.ensure_future(self.on_device_active(device_id))
+            return False
+
+        streak = self._silence_streak.get(device_id, 0) + 1
+        self._silence_streak[device_id] = streak
+        if streak >= 60 and self._device_active.get(device_id, True):
+            self._device_active[device_id] = False
+            if self.on_device_inactive:
+                asyncio.ensure_future(self.on_device_inactive(device_id))
+        if streak >= SILENCE_ADVANCE_AFTER:
+            pre_roll = int(PRE_ROLL_SECS * SAMPLE_RATE)
+            advance = max(0, len(audio) - pre_roll)
+            buf.mark_transcribed(advance)
+            logger.debug(
+                f"dev={device_id} silence streak={streak} "
+                f"body_rms={body_rms:.4f} tail_rms={tail_rms:.4f} "
+                f"pending={len(audio)/SAMPLE_RATE:.2f}s advance={advance/SAMPLE_RATE:.2f}s"
+            )
+        return True
 
     # ── Flush loops ───────────────────────────────────────────────────────
 
@@ -424,7 +435,6 @@ class VADTranscriptionPipeline:
             if audio is None or len(audio) < int(MIN_AUDIO_SECS * SAMPLE_RATE):
                 continue
             if self._handle_silence(device_id, audio, buf):
-                self._last_tx_time[device_id] = time.time()  # reset timer during silence
                 continue
 
             # Only transcribe at a phrase boundary or when forced by timer
@@ -464,7 +474,6 @@ class VADTranscriptionPipeline:
                 if audio is None or len(audio) < int(MIN_AUDIO_SECS * SAMPLE_RATE):
                     continue
                 if self._handle_silence(device_id, audio, buf):
-                    self._last_tx_time[device_id] = time.time()
                     continue
 
                 tail = audio[-int(TAIL_SILENCE_SECS * SAMPLE_RATE):]
