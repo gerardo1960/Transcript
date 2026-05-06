@@ -368,10 +368,12 @@ class RenameRequest(BaseModel):
 @app.post("/api/rename")
 async def rename_speaker(req: RenameRequest):
     if req.device_id not in active_speakers:
+        logger.warning(f"Rename failed: device {req.device_id} not in active_speakers")
         return {"success": False, "error": "Speaker not found"}
     await audio_manager.rename_device(req.device_id, req.new_name)  # best-effort
     pipeline.update_speaker_name(req.device_id, req.new_name)
     active_speakers[req.device_id]["name"] = req.new_name
+    logger.info(f"Renamed device {req.device_id} → '{req.new_name}'")
     await broadcast({"type": "speaker_renamed",
                      "data": {"device_id": req.device_id, "name": req.new_name}})
     return {"success": True}

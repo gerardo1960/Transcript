@@ -2137,12 +2137,19 @@
     }
     list.innerHTML = profiles.map((p, i) => {
       const mics  = Object.keys(p.devices || {}).length;
-      const label = Object.entries(p.devices || {}).map(([serial, s]) =>
-        `${serial}: G${s.gain_pct}% U${s.noise_gate.toFixed(3)}`
-      ).join(' · ');
+      const parts = Object.entries(p.devices || {}).map(([, s]) => {
+        const nm     = s.speaker_name || '';
+        const bench  = s.benched ? ' [bench]' : '';
+        return nm ? `${nm}${bench}` : '';
+      }).filter(Boolean);
+      const label = parts.length
+        ? parts.join(' · ')
+        : Object.entries(p.devices || {}).map(([serial, s]) =>
+            `${serial}: G${s.gain_pct}%`
+          ).join(' · ');
       const fontInfo = p.font_size ? ` · ${p.font_size}px` : '';
       const subtitle = mics
-        ? (label.length > 55 ? label.substring(0, 55) + '…' : label) + fontInfo
+        ? (label.length > 60 ? label.substring(0, 60) + '…' : label) + fontInfo
         : `sin mics${fontInfo}`;
       return `
         <div class="profile-item">
@@ -2165,9 +2172,12 @@
       const gainEl = document.getElementById(`gain-${devId}`);
       const gateEl = document.getElementById(`gate-${devId}`);
       if (!gainEl || !gateEl) return;
+      const nameEl = document.getElementById(`name-${devId}`);
       devices[serial] = {
-        gain_pct:   parseInt(gainEl.value),
-        noise_gate: parseInt(gateEl.value) / 1000,
+        speaker_name: nameEl ? nameEl.textContent.trim() : `Speaker ${devId}`,
+        gain_pct:     parseInt(gainEl.value),
+        noise_gate:   parseInt(gateEl.value) / 1000,
+        benched:      mutedSpeakers.has(parseInt(devId)),
       };
     });
 
@@ -2204,9 +2214,13 @@
     });
 
     let applied = 0;
+    let namesRestored = 0;
+    let noNameInProfile = 0;
     for (const [serial, settings] of Object.entries(profile.devices || {})) {
       const devId = serialToDevice[serial];
       if (devId === undefined) continue;
+
+      // Gain & noise gate
       const gainSlider = document.getElementById(`gain-${devId}`);
       const gateSlider = document.getElementById(`gate-${devId}`);
       const gateRaw = Math.round(settings.noise_gate * 1000);
@@ -2214,13 +2228,38 @@
       if (gateSlider) gateSlider.value = gateRaw;
       await setGain(devId, settings.gain_pct);
       await setGate(devId, gateRaw);
+
+      // Speaker name
+      if (settings.speaker_name) {
+        try {
+          const r = await fetch('/api/rename', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: devId, new_name: settings.speaker_name }),
+          });
+          const json = await r.json();
+          if (json.success) namesRestored++;
+        } catch (_) {}
+        renameSpeakerPanel(devId, settings.speaker_name);
+      } else {
+        noNameInProfile++;
+      }
+
+      // Bench state
+      const isBenched = mutedSpeakers.has(devId);
+      if (settings.benched && !isBenched) benchSpeaker(devId);
+      else if (!settings.benched && isBenched) restoreFromBench(devId);
+
       applied++;
     }
     const fontMsg = profile.font_size ? `, fuente ${profile.font_size}px` : '';
-    showToast(applied
-      ? `Perfil "${profile.name}" aplicado (${applied} mic${applied !== 1 ? 's' : ''}${fontMsg})`
-      : `Perfil "${profile.name}": ningún mic conectado coincide`
-    );
+    if (!applied) {
+      showToast(`Perfil "${profile.name}": ningún mic conectado coincide`);
+    } else if (noNameInProfile > 0) {
+      showToast(`Perfil "${profile.name}" aplicado (${applied} mics${fontMsg}) — ⚠️ guarda el perfil de nuevo para incluir nombres`);
+    } else {
+      showToast(`Perfil "${profile.name}" aplicado (${applied} mics, ${namesRestored} nombres${fontMsg})`);
+    }
   }
 
   function deleteProfile(idx) {
