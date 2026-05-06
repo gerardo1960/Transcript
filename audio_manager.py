@@ -155,6 +155,38 @@ class PipeWireAudioManager:
     #  Capture Control                                                     #
     # ------------------------------------------------------------------ #
 
+    async def find_current_node_name(self, bus_path: str) -> Optional[str]:
+        """Find the current PipeWire Source node name for a given USB bus-path."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pw-dump",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            nodes = json.loads(stdout.decode())
+
+            bus_map: Dict[int, str] = {}
+            for obj in nodes:
+                if obj.get("type") != "PipeWire:Interface:Device":
+                    continue
+                bp = obj.get("info", {}).get("props", {}).get("device.bus-path", "")
+                if bp:
+                    bus_map[obj["id"]] = bp
+
+            for node in nodes:
+                if node.get("type") != "PipeWire:Interface:Node":
+                    continue
+                props = node.get("info", {}).get("props", {})
+                if "Source" not in props.get("media.class", ""):
+                    continue
+                dev_obj_id = props.get("device.id", -1)
+                if bus_map.get(dev_obj_id) == bus_path:
+                    return props.get("node.name")
+        except Exception as e:
+            logger.error(f"find_current_node_name error: {e}")
+        return None
+
     async def start_capture(
         self,
         device: AudioDevice,
@@ -205,52 +237,85 @@ class PipeWireAudioManager:
     async def _capture_loop(self, device: AudioDevice) -> None:
         """
         Launch pw-record for a specific node and feed PCM chunks to the callback.
-        Stereo devices (DJI wireless receivers) split L/R into two virtual device IDs.
-        Falls back to simulated white-noise audio if pw-record is unavailable.
+        Targets the node by name (stable within session) looked up fresh by bus-path
+        each attempt, so PipeWire node-ID churn doesn't break capture.
+        Auto-restarts up to 5 times if the stream dies unexpectedly.
         """
         n_channels = 2 if device.is_stereo else CHANNELS
-        cmd = [
-            "pw-record",
-            "--target", str(device.id),
-            "--rate", str(SAMPLE_RATE),
-            "--channels", str(n_channels),
-            "--format", "s16",
-            "-",
-        ]
+        bytes_per_chunk = CHUNK_SAMPLES * BYTES_PER_SAMPLE * n_channels
+        attempts = 0
 
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            device.process = process
-            bytes_per_chunk = CHUNK_SAMPLES * BYTES_PER_SAMPLE * n_channels
-
-            while device.active:
-                raw = await process.stdout.readexactly(bytes_per_chunk)
-                if device.is_stereo:
-                    interleaved = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-                    left  = interleaved[0::2]
-                    right = interleaved[1::2]
-                    if device.callback:
-                        await device.callback(device.id, left)
-                        if device.stereo_right_id is not None:
-                            await device.callback(device.stereo_right_id, right)
+        while device.active:
+            # Resolve the current node name by bus-path so we survive ID churn
+            target = device.pw_node_name  # fallback
+            if device.bus_path:
+                fresh = await self.find_current_node_name(device.bus_path)
+                if fresh:
+                    if fresh != device.pw_node_name:
+                        logger.info(f"{device.name}: node name updated {device.pw_node_name!r} → {fresh!r}")
+                        device.pw_node_name = fresh
+                    target = fresh
                 else:
-                    pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-                    if device.callback:
-                        await device.callback(device.id, pcm)
+                    logger.warning(f"{device.name}: no Source node for bus {device.bus_path}, retrying in 5s")
+                    await asyncio.sleep(5)
+                    continue
 
-        except FileNotFoundError:
-            logger.warning(f"pw-record unavailable — simulating audio for {device.name}")
-            await self._simulate_audio(device)
-        except asyncio.IncompleteReadError:
-            logger.info(f"Audio stream ended for {device.name}")
-        except Exception as e:
-            logger.error(f"Capture error for {device.name}: {e}")
-        finally:
-            device.active = False
+            cmd = [
+                "pw-record",
+                "--target", target,
+                "--rate", str(SAMPLE_RATE),
+                "--channels", str(n_channels),
+                "--format", "s16",
+                "-",
+            ]
+
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                device.process = process
+                attempts = 0  # reset on successful start
+                logger.info(f"Capturing {device.name} via target={target!r}")
+
+                while device.active:
+                    raw = await process.stdout.readexactly(bytes_per_chunk)
+                    if device.is_stereo:
+                        interleaved = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                        left  = interleaved[0::2]
+                        right = interleaved[1::2]
+                        if device.callback:
+                            await device.callback(device.id, left)
+                            if device.stereo_right_id is not None:
+                                await device.callback(device.stereo_right_id, right)
+                    else:
+                        pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                        if device.callback:
+                            await device.callback(device.id, pcm)
+
+            except FileNotFoundError:
+                logger.warning(f"pw-record unavailable — simulating audio for {device.name}")
+                await self._simulate_audio(device)
+                return
+            except asyncio.IncompleteReadError:
+                attempts += 1
+                if device.active:
+                    logger.warning(f"{device.name}: stream ended (attempt {attempts}), retrying in 3s")
+                    await asyncio.sleep(3)
+                else:
+                    break
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                attempts += 1
+                logger.error(f"Capture error for {device.name}: {e} (attempt {attempts})")
+                if device.active:
+                    await asyncio.sleep(3)
+                else:
+                    break
+
+        device.active = False
 
     async def _simulate_audio(self, device: AudioDevice) -> None:
         """

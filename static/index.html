@@ -1820,7 +1820,7 @@
   }
 
   function saveNameToList(name) {
-    if (!name || /^Speaker \d+$/.test(name)) return;
+    if (!name || /^Speaker \d+$/.test(name) || /^PORT\w+$/.test(name)) return;
     const names = getSavedNames().filter(n => n !== name);
     names.unshift(name);
     localStorage.setItem(SAVED_NAMES_KEY, JSON.stringify(names.slice(0, 30)));
@@ -1873,8 +1873,7 @@
   });
 
   async function resetName(deviceId) {
-    const idx = speakerOrder.indexOf(deviceId);
-    const defaultName = `Speaker ${idx + 1}`;
+    const defaultName = DEVICE_SERIALS[deviceId] || `Speaker ${speakerOrder.indexOf(deviceId) + 1}`;
     try {
       await fetch('/api/rename', {
         method: 'POST',

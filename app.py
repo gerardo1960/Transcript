@@ -149,18 +149,11 @@ async def startup():
         [d for d in devices if "alsa_input.usb" in d.pw_node_name.lower()],
         key=lambda d: d.id
     )
-    default_names = ["Speaker 1", "Speaker 2", "Speaker 3", "Speaker 4",
-                     "Speaker 5", "Speaker 6", "Speaker 7", "Speaker 8"]
-    name_idx = 0
     for device in usb_devices:
-        if name_idx >= len(default_names):
-            break
         serial = extract_serial(device.pw_node_name, device.bus_path)
         if device.is_stereo:
             for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
-                if name_idx >= len(default_names):
-                    break
-                name = default_names[name_idx]
+                name = serial + suffix
                 active_speakers[dev_id] = {
                     "device_id": dev_id,
                     "name": name,
@@ -169,15 +162,15 @@ async def startup():
                     "mac": device.mac_address,
                     "gain_pct": DEFAULT_GAIN_PCT,
                     "noise_gate": DEFAULT_NOISE_GATE,
+                    "bus_path": device.bus_path,
                 }
                 pipeline.register_speaker(dev_id, name)
                 pipeline.set_noise_gate(dev_id, DEFAULT_NOISE_GATE)
                 buffer_mgr.register_device(dev_id, serial + suffix)
-                name_idx += 1
             await audio_manager.start_capture(device, callback=on_audio_chunk)
             _apply_gain(device, DEFAULT_GAIN_PCT)
         else:
-            name = default_names[name_idx]
+            name = serial
             active_speakers[device.id] = {
                 "device_id": device.id,
                 "name": name,
@@ -186,13 +179,13 @@ async def startup():
                 "mac": device.mac_address,
                 "gain_pct": DEFAULT_GAIN_PCT,
                 "noise_gate": DEFAULT_NOISE_GATE,
+                "bus_path": device.bus_path,
             }
             pipeline.register_speaker(device.id, name)
             pipeline.set_noise_gate(device.id, DEFAULT_NOISE_GATE)
             buffer_mgr.register_device(device.id, serial)
             await audio_manager.start_capture(device, callback=on_audio_chunk)
             _apply_gain(device, DEFAULT_GAIN_PCT)
-            name_idx += 1
 
     pipeline.buffer_mgr = buffer_mgr
     logger.info(f"System ready — {len(active_speakers)} speaker(s) active")
@@ -249,32 +242,17 @@ async def pipewire_watchdog():
                         [d for d in devices if "alsa_input.usb" in d.pw_node_name.lower()],
                         key=lambda d: d.id
                     )
+                    # Match fresh nodes to existing active_speakers by bus_path
+                    bp_to_dev_id = {
+                        sp.get("bus_path", ""): dev_id
+                        for dev_id, sp in active_speakers.items()
+                        if sp.get("bus_path")
+                    }
                     for device in usb_devices:
-                        if device.id not in active_speakers:
-                            serial = extract_serial(device.pw_node_name, device.bus_path)
-                            if device.is_stereo:
-                                for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
-                                    name = f"Speaker {len(active_speakers) + 1}"
-                                    active_speakers[dev_id] = {
-                                        "device_id": dev_id,
-                                        "name": name,
-                                        "serial": serial + suffix,
-                                        "pw_node_name": device.pw_node_name,
-                                        "mac": device.mac_address,
-                                    }
-                                    pipeline.register_speaker(dev_id, name)
-                                    buffer_mgr.register_device(dev_id, serial + suffix)
-                            else:
-                                name = f"Speaker {len(active_speakers) + 1}"
-                                active_speakers[device.id] = {
-                                    "device_id": device.id,
-                                    "name": name,
-                                    "serial": serial,
-                                    "pw_node_name": device.pw_node_name,
-                                    "mac": device.mac_address,
-                                }
-                                pipeline.register_speaker(device.id, name)
-                                buffer_mgr.register_device(device.id, serial)
+                        existing_id = bp_to_dev_id.get(device.bus_path)
+                        if existing_id is not None:
+                            # Update pw_node_name in the existing speaker record
+                            active_speakers[existing_id]["pw_node_name"] = device.pw_node_name
                         await audio_manager.start_capture(device, callback=on_audio_chunk)
                     await broadcast({"type": "pipewire_restarted"})
                     consecutive_fused = 0
@@ -300,7 +278,7 @@ async def hotplug_scanner():
                     serial = extract_serial(device.pw_node_name, device.bus_path)
                     if device.is_stereo:
                         for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
-                            name = f"Speaker {len(active_speakers) + 1}"
+                            name = serial + suffix
                             active_speakers[dev_id] = {
                                 "device_id": dev_id,
                                 "name": name,
@@ -314,7 +292,7 @@ async def hotplug_scanner():
                         await audio_manager.start_capture(device, callback=on_audio_chunk)
                         logger.info(f"Hotplug: registered DJI stereo (id={device.id})")
                     else:
-                        name = f"Speaker {len(active_speakers) + 1}"
+                        name = serial
                         active_speakers[device.id] = {
                             "device_id": device.id,
                             "name": name,

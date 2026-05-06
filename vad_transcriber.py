@@ -36,30 +36,40 @@ EXCLUSIVE_SLOTS = 4   # pools 0-3
 SHARED_POOL     = 4   # pool 4
 
 
+_STOPWORDS = {
+    # Spanish articles, prepositions, conjunctions, pronouns
+    "la", "el", "los", "las", "de", "del", "en", "a", "al", "y", "o", "e",
+    "que", "se", "es", "son", "no", "ni", "si", "su", "sus", "un", "una",
+    "lo", "le", "les", "me", "mi", "te", "tu", "yo", "él", "ella",
+    # English equivalents
+    "the", "a", "an", "is", "are", "of", "in", "on", "and", "or", "not",
+    "to", "it", "he", "she", "we", "i", "you", "my", "your", "its",
+}
+
 def _looks_like_hallucination(text: str) -> bool:
     """Catch repetitive / counting hallucinations that Whisper produces on near-silent audio."""
     # ── Pattern 1: dot-chained repetition without spaces ("I...I...I..." or "You.You.You.") ──
-    # Split on punctuation runs and check if a single short token dominates
     punct_tokens = [t.strip() for t in re.split(r'[.\s]+', text) if t.strip()]
     if len(punct_tokens) >= 6:
         counts_p = Counter(t.lower() for t in punct_tokens)
-        top_p = counts_p.most_common(1)[0][1]
-        if top_p / len(punct_tokens) > 0.5:
+        top_word, top_p = counts_p.most_common(1)[0]
+        if top_word not in _STOPWORDS and top_p / len(punct_tokens) > 0.5:
             return True
 
     # ── Pattern 2: word-level repetition ──
     words = text.split()
-    if len(words) < 4:
+    if len(words) < 8:          # short phrases repeat naturally in Spanish
         return False
-    tokens = [re.sub(r"[.,!?;:\-]", "", w).lower() for w in words]
+    tokens = [re.sub(r"[.,!?;:\-¿¡]", "", w).lower() for w in words]
     counts = Counter(tokens)
-    top_count = counts.most_common(1)[0][1]
-    if top_count / len(tokens) > 0.25:
+    top_word, top_count = counts.most_common(1)[0]
+    # Require at least 3 occurrences AND the word is not a stopword
+    if top_count >= 3 and top_word not in _STOPWORDS and top_count / len(tokens) > 0.40:
         return True
 
     # ── Pattern 3: mostly numbers ("1, 2, 3, 4, 5...") ──
     number_tokens = sum(1 for t in tokens if re.fullmatch(r"\d+", t))
-    if number_tokens / len(tokens) > 0.35:
+    if len(tokens) >= 6 and number_tokens / len(tokens) > 0.50:
         return True
 
     return False
@@ -158,16 +168,21 @@ class WhisperTranscriber:
             return None
 
         texts, total_logprob, count = [], 0.0, 0
+        rejected = []
         for seg in segments:
             t              = seg.text.strip()
             avg_logprob    = getattr(seg, "avg_logprob", -1.0)
             no_speech_prob = getattr(seg, "no_speech_prob", 1.0)
-            if t and avg_logprob > -0.8 and no_speech_prob < 0.6:
+            if t and avg_logprob >= -1.1 and no_speech_prob < 0.6:
                 texts.append(t)
                 total_logprob += avg_logprob
                 count         += 1
+            elif t:
+                rejected.append(f"logp={avg_logprob:.2f} nsp={no_speech_prob:.2f} '{t[:30]}'")
 
         if not texts:
+            if rejected:
+                logger.info(f"All segs filtered: {rejected[:3]}")
             return None
 
         HALLUCINATIONS = {
