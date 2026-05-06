@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Transcript — Manual de Usuario</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0c10;
+      --surface: #111418;
+      --surface2: #161b24;
+      --border: #1e2330;
+      --text: #e8eaf0;
+      --text-dim: #6b7390;
+      --accent: #00e5ff;
+      --lime: #7cfc5e;
+      --coral: #ff7043;
+      --violet: #c77dff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      padding: 0;
+    }
+    /* ── Cover ── */
+    .cover {
+      background: linear-gradient(160deg, #0f1520 0%, #0a0c10 60%);
+      border-bottom: 1px solid var(--border);
+      padding: 64px 40px 48px;
+      text-align: center;
+    }
+    .cover-logo {
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+    .cover h1 {
+      font-size: 42px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .cover h1 span { color: var(--accent); }
+    .cover-sub {
+      font-size: 16px;
+      color: var(--text-dim);
+      margin-bottom: 32px;
+    }
+    .cover-pills {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .pill {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 4px 14px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    /* ── TOC ── */
+    .toc {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 32px 40px;
+    }
+    .toc h2 {
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+    }
+    .toc ol {
+      columns: 2;
+      column-gap: 40px;
+      padding-left: 20px;
+    }
+    .toc li {
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+    .toc a { color: var(--accent); text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    /* ── Content ── */
+    .content { max-width: 860px; margin: 0 auto; padding: 0 40px 80px; }
+    section { margin-top: 64px; scroll-margin-top: 24px; }
+    h2.section-title {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text);
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    h2.section-title .num {
+      background: var(--accent);
+      color: #000;
+      font-size: 12px;
+      font-weight: 700;
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    h3 {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 28px 0 10px;
+    }
+    p { margin-bottom: 14px; color: #c8cad4; }
+    ul, ol { padding-left: 22px; margin-bottom: 14px; }
+    li { margin-bottom: 6px; color: #c8cad4; }
+    strong { color: var(--text); }
+    /* ── Screen mockups ── */
+    .screen {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0;
+      margin: 20px 0 28px;
+      overflow: hidden;
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .screen-bar {
+      background: #0f1218;
+      border-bottom: 1px solid var(--border);
+      padding: 8px 16px;
+      font-size: 10px;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .screen-bar .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .screen-bar .dot.r { background: #ff5f56; }
+    .screen-bar .dot.y { background: #ffbd2e; }
+    .screen-bar .dot.g { background: #27c93f; }
+    .screen-body { padding: 16px 20px; white-space: pre; overflow-x: auto; color: #b0b4c8; }
+    .hl   { color: var(--accent); }
+    .hl2  { color: var(--lime); }
+    .hl3  { color: var(--coral); }
+    .hl4  { color: var(--violet); }
+    .dim  { color: var(--text-dim); }
+    /* ── Callouts ── */
+    .callout {
+      border-left: 3px solid var(--accent);
+      background: rgba(0,229,255,0.06);
+      padding: 12px 16px;
+      border-radius: 0 8px 8px 0;
+      margin: 16px 0;
+    }
+    .callout.warn {
+      border-color: #ffbd2e;
+      background: rgba(255,189,46,0.06);
+    }
+    .callout.tip {
+      border-color: var(--lime);
+      background: rgba(124,252,94,0.06);
+    }
+    .callout-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .callout .callout-title { color: var(--accent); }
+    .callout.warn .callout-title { color: #ffbd2e; }
+    .callout.tip .callout-title { color: var(--lime); }
+    /* ── Table ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 24px;
+      font-size: 13px;
+    }
+    th {
+      background: var(--surface2);
+      color: var(--text-dim);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 8px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--border);
+      color: #c8cad4;
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    td strong { color: var(--text); }
+    /* ── Badge ── */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: 'DM Mono', monospace;
+    }
+    .badge.e { background: rgba(0,229,255,0.15); color: var(--accent); border: 1px solid rgba(0,229,255,0.3); }
+    .badge.sh { background: rgba(58,64,85,0.4); color: var(--text-dim); border: 1px solid var(--border); }
+    .badge.live { background: rgba(124,252,94,0.15); color: var(--lime); border: 1px solid rgba(124,252,94,0.3); }
+    /* ── Steps ── */
+    .steps { counter-reset: step; margin: 16px 0; }
+    .step {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 14px;
+      align-items: flex-start;
+    }
+    .step-num {
+      counter-increment: step;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      min-width: 26px; height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .step-body { flex: 1; }
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 24px 40px;
+      font-size: 12px;
+      color: var(--text-dim);
+      text-align: center;
+    }
+    @media print {
+      body { background: #fff; color: #000; }
+      .screen { border: 1px solid #ccc; }
+      .screen-body { color: #333; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══ PORTADA ══════════════════════════════════════════════════════════ -->
+<div class="cover">
+  <div class="cover-logo">Manual de Usuario · v1.0</div>
+  <h1>Live <span>Transcript</span></h1>
+  <p class="cover-sub">Sistema de transcripción en tiempo real con múltiples micrófonos Bluetooth</p>
+  <div class="cover-pills">
+    <span class="pill">Whisper large-v3</span>
+    <span class="pill">PipeWire Audio</span>
+    <span class="pill">Hasta 8 micrófonos</span>
+    <span class="pill">Perfiles de configuración</span>
+    <span class="pill">Vista Grid + Vista Enfocada</span>
+  </div>
+</div>
+
+<!-- ══ ÍNDICE ════════════════════════════════════════════════════════════ -->
+<div class="toc">
+  <h2>Índice</h2>
+  <ol>
+    <li><a href="#intro">¿Qué es Live Transcript?</a></li>
+    <li><a href="#inicio">Iniciar el sistema</a></li>
+    <li><a href="#topbar">Barra superior</a></li>
+    <li><a href="#grid">Vista de cuadrícula (Grid)</a></li>
+    <li><a href="#panel">Panel de micrófono</a></li>
+    <li><a href="#renombrar">Renombrar un micrófono</a></li>
+    <li><a href="#controles">Ganancia y umbral de ruido</a></li>
+    <li><a href="#bench">Enviar al bench</a></li>
+    <li><a href="#focus">Vista enfocada (Focus)</a></li>
+    <li><a href="#perfiles">Perfiles de configuración</a></li>
+    <li><a href="#ajustes">Panel de ajustes</a></li>
+    <li><a href="#pool">Asignación de GPUs (Pools)</a></li>
+    <li><a href="#movil">Uso en móvil / tablet</a></li>
+    <li><a href="#problemas">Preguntas frecuentes</a></li>
+  </ol>
+</div>
+
+<div class="content">
+
+<!-- ══ 1. INTRODUCCIÓN ══════════════════════════════════════════════════ -->
+<section id="intro">
+  <h2 class="section-title"><span class="num">1</span>¿Qué es Live Transcript?</h2>
+
+  <p>
+    <strong>Live Transcript</strong> es una aplicación web que transcribe en tiempo real el audio
+    de hasta 8 micrófonos Bluetooth o inalámbricos simultáneos. Cada micrófono aparece como
+    un panel independiente con su propio texto, controles de volumen y configuración.
+  </p>
+  <p>
+    La transcripción utiliza el modelo de inteligencia artificial <strong>Whisper large-v3</strong>
+    con aceleración por GPU, lo que garantiza alta precisión en múltiples idiomas sin necesidad
+    de conexión a internet.
+  </p>
+
+  <h3>Casos de uso típicos</h3>
+  <ul>
+    <li>Reuniones y conferencias con varios participantes</li>
+    <li>Entrevistas periodísticas o podcasts</li>
+    <li>Clases y seminarios con múltiples ponentes</li>
+    <li>Subtitulado en directo para accesibilidad</li>
+  </ul>
+
+  <div class="callout">
+    <div class="callout-title">Importante</div>
+    El servidor debe estar ejecutándose en la misma red. La aplicación se abre en el navegador
+    web, normalmente en <strong>http://localhost:8000</strong> o en la IP de la máquina servidora.
+  </div>
+</section>
+
+<!-- ══ 2. INICIO ════════════════════════════════════════════════════════ -->
+<section id="inicio">
+  <h2 class="section-title"><span class="num">2</span>Iniciar el sistema</h2>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <strong>Conectar los micrófonos</strong> — Enchufar los receptores DJI Mic Mini (u otros
+        dispositivos Bluetooth/USB) antes de arrancar el servidor.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <strong>Arrancar el servidor</strong> — En la terminal del equipo servidor ejecutar:
+        <br><code style="background:var(--surface2);padding:2px 8px;border-radius:4px;font-family:'DM Mono',monospace;font-size:13px">python app.py</code>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <strong>Abrir el navegador</strong> — Ir a <code style="background:var(--surface2);padding:2px 8px;border-radius:4px;font-family:'DM Mono',monospace;font-size:13px">http://&lt;IP-del-servidor&gt;:8000</code>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <strong>Verificar la conexión</strong> — El punto verde en la barra superior indica que
+        la conexión está activa. Los paneles de los micrófonos aparecen automáticamente.
+      </div>
+    </div>
+  </div>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Estado inicial — sistema listo</span>
+    </div>
+    <div class="screen-body"><span class="hl2">●</span> <span class="hl">LIVE TRANSCRIPT</span>                               <span class="dim">A ──── A   ⊞ Focus   ⚙ Settings   8 speakers</span>
+<span class="dim">──────────────────────────────────────────────────────────────────────────</span>
+El punto verde indica conexión activa con el servidor.
+Si el punto es <span class="hl3">rojo</span> o gris, el servidor no está corriendo o hay
+un problema de red — revisar que <code>app.py</code> esté en ejecución.</div>
+  </div>
+</section>
+
+<!-- ══ 3. BARRA SUPERIOR ════════════════════════════════════════════════ -->
+<section id="topbar">
+  <h2 class="section-title"><span class="num">3</span>Barra superior</h2>
+
+  <p>La barra superior es visible en todo momento y contiene los controles globales de la aplicación.</p>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Barra superior completa</span>
+    </div>
+    <div class="screen-body">┌─────────────────────────────────────────────────────────────────────┐
+│ <span class="hl2">●</span>  LIVE <span class="hl">TRANSCRIPT</span>          A ─●─── A   <span class="dim">[⊞ Focus]</span>  <span class="dim">[⚙ Settings]</span>  <span class="dim">8 speakers</span> │
+└─────────────────────────────────────────────────────────────────────┘
+ ①          ②               ③                ④           ⑤          ⑥</div>
+  </div>
+
+  <table>
+    <tr>
+      <th>Elemento</th>
+      <th>Descripción</th>
+    </tr>
+    <tr>
+      <td>① Punto de estado</td>
+      <td><span style="color:var(--lime)">●</span> Verde = conectado · <span style="color:var(--coral)">●</span> Rojo = error · Gris = desconectado (reconectando automáticamente)</td>
+    </tr>
+    <tr>
+      <td>② Título</td>
+      <td>Nombre de la aplicación. No es interactivo.</td>
+    </tr>
+    <tr>
+      <td>③ Tamaño de letra</td>
+      <td>Deslizador entre <strong>A</strong> pequeña y <strong>A</strong> grande (rango 11–22 px). Afecta el texto de transcripción en todos los paneles.</td>
+    </tr>
+    <tr>
+      <td>④ Botón de vista</td>
+      <td><strong>⊞ Focus</strong> — cambia a Vista Enfocada. Cuando estás en esa vista muestra <strong>⊟ Grid</strong> para volver.</td>
+    </tr>
+    <tr>
+      <td>⑤ Ajustes</td>
+      <td>Abre el panel lateral de configuración avanzada (perfiles, pools de GPU, dispositivos).</td>
+    </tr>
+    <tr>
+      <td>⑥ Contador de micrófonos</td>
+      <td>Número de micrófonos activos en este momento.</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ══ 4. VISTA DE CUADRÍCULA ═══════════════════════════════════════════ -->
+<section id="grid">
+  <h2 class="section-title"><span class="num">4</span>Vista de cuadrícula (Grid)</h2>
+
+  <p>
+    La vista principal muestra todos los micrófonos activos en una cuadrícula. El número de columnas
+    y filas se ajusta automáticamente según cuántos micrófonos están en uso.
+  </p>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Vista Grid con 4 micrófonos activos (2×2)</span>
+    </div>
+    <div class="screen-body">┌──────────────────────────┬──────────────────────────┐
+│ <span class="hl">●  Gerard</span>          <span class="badge e">E1</span>  │ <span class="hl2">●  Alice</span>            <span class="badge e">E2</span>  │
+│ <span class="dim">#PORT1L  ES  ↓  ✕</span>        │ <span class="dim">#PORT1R  EN  ↓  ✕</span>        │
+│                          │                          │
+│ <span class="dim">14:23:01</span> Buenos días a   │ <span class="dim">14:23:05</span> So we need to  │
+│ todos, hoy vamos a       │ discuss the budget for   │
+│ <strong>revisar el presupuesto</strong>  │ <strong>next quarter…</strong>         │
+│                          │                          │
+│ ▁▃▅▇▅▃▁▃▅               │ ▁▁▁▁▁▁▁▁▁               │
+│ 🎙 ──●──── 90%  🔇 ─●─── 0.020 │ 🎙 ──●──── 85%  🔇 ─●─── 0.025 │
+├──────────────────────────┼──────────────────────────┤
+│ <span class="hl3">○  Carlos</span>          <span class="badge sh">SH</span>  │ <span class="hl4">○  María</span>            <span class="badge sh">SH</span>  │
+│ <span class="dim">#PORT2L  ES  ↓  ✕</span>        │ <span class="dim">#PORT2R  ES  ↓  ✕</span>        │
+│                          │                          │
+│ 🎙 Esperando audio…      │ 🎙 Esperando audio…      │
+│                          │                          │
+│ ▁▁▁▁▁▁▁▁▁               │ ▁▁▁▁▁▁▁▁▁               │
+│ 🎙 ──●──── 90%  🔇 ─●─── 0.020 │ 🎙 ──●──── 90%  🔇 ─●─── 0.020 │
+└──────────────────────────┴──────────────────────────┘</div>
+  </div>
+
+  <h3>Distribución automática según número de micrófonos</h3>
+
+  <table>
+    <tr>
+      <th>Micrófonos activos</th>
+      <th>Distribución (escritorio)</th>
+      <th>Distribución (móvil)</th>
+    </tr>
+    <tr><td>1</td><td>1 columna × 1 fila (pantalla completa)</td><td>1 columna</td></tr>
+    <tr><td>2</td><td>2 columnas × 1 fila (lado a lado)</td><td>2 columnas</td></tr>
+    <tr><td>3</td><td>3 columnas × 1 fila (altura máxima)</td><td>2 columnas</td></tr>
+    <tr><td>4</td><td>2 columnas × 2 filas</td><td>2 columnas</td></tr>
+    <tr><td>5–6</td><td>3 columnas × 2 filas</td><td>2 columnas</td></tr>
+    <tr><td>7–8</td><td>4 columnas × 2 filas</td><td>2 columnas</td></tr>
+  </table>
+
+  <div class="callout tip">
+    <div class="callout-title">Consejo</div>
+    Si quieres leer más texto en un micrófono concreto, envía los demás al
+    <strong>bench</strong> (ver sección 8). La cuadrícula se reajusta automáticamente
+    y ese micrófono ocupa más espacio.
+  </div>
+</section>
+
+<!-- ══ 5. PANEL DE MICRÓFONO ═════════════════════════════════════════════ -->
+<section id="panel">
+  <h2 class="section-title"><span class="num">5</span>Panel de micrófono</h2>
+
+  <p>Cada micrófono tiene su propio panel. A continuación se describen todos los elementos:</p>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Panel de micrófono — detalle</span>
+    </div>
+    <div class="screen-body">┌────────────────────────────────────────────────────┐
+│<span class="hl">▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬</span>  ← barra de color
+│                                                    │
+│  [<span class="hl">G</span>]  <span class="hl">Gerard</span>    <span class="dim">#PORT1L  ES</span>  <span class="badge live">● LIVE</span>  <span class="badge e">E1</span>  <span class="dim">↓  ✕</span>  │ ← cabecera
+│                                                    │
+│  <span class="dim">─────────────────────────────────────── HISTORIAL</span>  │
+│  <span class="dim">14:22:45</span>  Buenas tardes, hoy vamos a hablar       │ ← texto antiguo
+│            sobre el nuevo proyecto de software.    │
+│  <span class="dim">14:23:01</span>  El presupuesto inicial es de cien mil     │
+│            euros para el primer trimestre.         │
+│  <span class="dim">14:23:18</span>  <strong style="color:#fff">Necesitamos revisar cada partida antes</strong>    │ ← texto actual
+│            <strong style="color:#fff">de tomar una decisión final.</strong>            │
+│                                                    │
+│  ▁▃▅▇▅▃▁▃▅  ← animación de onda (activo)          │
+│  <span class="dim">🎙</span> <span class="dim">Ganancia  ──●──────  90%</span>                       │ ← control de ganancia
+│  <span class="dim">🔇</span> <span class="dim">Umbral    ────●────  0.020</span>                     │ ← control de umbral
+└────────────────────────────────────────────────────┘</div>
+  </div>
+
+  <table>
+    <tr><th>Elemento</th><th>Descripción</th></tr>
+    <tr>
+      <td><strong>Barra de color</strong></td>
+      <td>Identifica visualmente al hablante: cian, lima, coral o violeta (se asigna automáticamente al orden de conexión).</td>
+    </tr>
+    <tr>
+      <td><strong>Avatar</strong> [G]</td>
+      <td>Círculo con la inicial del nombre del hablante. Se actualiza cuando se cambia el nombre.</td>
+    </tr>
+    <tr>
+      <td><strong>Nombre</strong></td>
+      <td>Nombre del hablante (editable — ver sección 6). Por defecto "Speaker 1", "Speaker 2"…</td>
+    </tr>
+    <tr>
+      <td><strong>#PORT1L</strong></td>
+      <td>Identificador estable del puerto USB. Permite que los perfiles recuerden qué micrófono es cuál aunque cambie el número de dispositivo.</td>
+    </tr>
+    <tr>
+      <td><strong>ES / EN</strong></td>
+      <td>Idioma detectado en el último segmento (código ISO). Se actualiza automáticamente.</td>
+    </tr>
+    <tr>
+      <td><span class="badge live">● LIVE</span></td>
+      <td>Aparece parpadeando cuando el micrófono está captando voz en este momento.</td>
+    </tr>
+    <tr>
+      <td><span class="badge e">E1</span> / <span class="badge sh">SH</span></td>
+      <td><strong>E1–E4</strong> = GPU exclusiva asignada. <strong>SH</strong> = pool compartido. Ver sección 12.</td>
+    </tr>
+    <tr>
+      <td><strong>↓</strong></td>
+      <td>Enviar este micrófono al bench (lo oculta del grid para dar más espacio a los demás).</td>
+    </tr>
+    <tr>
+      <td><strong>✕</strong></td>
+      <td>Borrar el historial de transcripción de este panel (sólo visual, no afecta la grabación).</td>
+    </tr>
+    <tr>
+      <td><strong>Texto de transcripción</strong></td>
+      <td>El texto más reciente aparece resaltado en blanco. El historial anterior se muestra en color apagado. Se acumula hasta limpiar el panel.</td>
+    </tr>
+    <tr>
+      <td><strong>Animación de barras</strong></td>
+      <td>Las 9 barras verticales se animan cuando hay audio activo. En silencio están quietas.</td>
+    </tr>
+    <tr>
+      <td><strong>Ganancia 🎙</strong></td>
+      <td>Amplificación de la señal de audio antes de procesar. 0% = mudo, 100% = máximo. Ver sección 7.</td>
+    </tr>
+    <tr>
+      <td><strong>Umbral 🔇</strong></td>
+      <td>Nivel mínimo de sonido para activar la transcripción. Filtra el ruido de fondo. Ver sección 7.</td>
+    </tr>
+  </table>
+
+  <div class="callout">
+    <div class="callout-title">Flash de texto nuevo</div>
+    Cuando llega un nuevo segmento de texto, el borde del panel destella en blanco durante 2 segundos.
+    Esto permite identificar rápidamente qué micrófono acaba de transcribir algo.
+  </div>
+</section>
+
+<!-- ══ 6. RENOMBRAR ═════════════════════════════════════════════════════ -->
+<section id="renombrar">
+  <h2 class="section-title"><span class="num">6</span>Renombrar un micrófono</h2>
+
+  <p>
+    Cada micrófono puede tener un nombre personalizado (por ejemplo el nombre real del hablante).
+    El nombre se sincroniza en toda la aplicación: panel, feed de la vista enfocada, bench y sidebar.
+  </p>
+
+  <h3>Cómo renombrar</h3>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <strong>Haz clic en el nombre</strong> del hablante en el panel. Aparece un menú contextual.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        Selecciona <strong>✏ Editar</strong>. El nombre se convierte en un campo de texto editable.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        Escribe el nuevo nombre o selecciona uno de la <strong>lista de nombres guardados</strong>
+        que aparece debajo del campo.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        Confirma con <strong>Enter</strong> o haciendo clic fuera del campo.
+        Cancela con <strong>Escape</strong> (vuelve al nombre anterior).
+      </div>
+    </div>
+  </div>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Menú contextual de nombre + campo de edición</span>
+    </div>
+    <div class="screen-body">  [<span class="hl">G</span>]  <span class="hl">Gerard</span>  ← hacer clic aquí
+         │
+         ▼
+  ┌─────────────────┐
+  │ ✏  Editar       │  ← abre campo de texto
+  │ ★  Guardar nombre│  ← guarda en historial sin editar
+  │ ↩  Resetear     │  ← vuelve al nombre por defecto (Speaker N)
+  └─────────────────┘
+
+  Cuando seleccionas "Editar":
+
+  [<span class="hl">G</span>]  ┌──────────────────┐
+       │  Gerard          │  ← escribe el nuevo nombre
+       └──────────────────┘
+          ┌──────────────────┐
+          │ Gerard           │  ← lista de nombres anteriores
+          │ Sr. García  ×    │
+          │ Participante 1 × │
+          └──────────────────┘</div>
+  </div>
+
+  <h3>Opciones del menú contextual</h3>
+  <table>
+    <tr><th>Opción</th><th>Descripción</th></tr>
+    <tr><td><strong>✏ Editar</strong></td><td>Abre el campo de edición inline.</td></tr>
+    <tr><td><strong>★ Guardar nombre</strong></td><td>Añade el nombre actual al historial de nombres guardados (para reutilizarlo en el futuro).</td></tr>
+    <tr><td><strong>↩ Resetear</strong></td><td>Vuelve al nombre por defecto "Speaker N". Se muestra en rojo como acción de riesgo.</td></tr>
+  </table>
+
+  <div class="callout tip">
+    <div class="callout-title">Consejo — Historial de nombres</div>
+    Los nombres que has usado anteriormente se guardan automáticamente (hasta 30 nombres).
+    Aparecen al editar cualquier micrófono, lo que facilita asignar nombres en reuniones
+    recurrentes sin tener que escribirlos de nuevo.
+  </div>
+
+  <div class="callout warn">
+    <div class="callout-title">Importante — Persistencia de nombres</div>
+    Los nombres se guardan en memoria mientras el servidor está activo. Al reiniciar el servidor,
+    los nombres vuelven a "Speaker N". Para que los nombres persistan entre reinicios,
+    <strong>guarda un perfil</strong> (ver sección 10) y aplícalo cada vez que inicies una sesión.
+  </div>
+</section>
+
+<!-- ══ 7. GANANCIA Y UMBRAL ══════════════════════════════════════════════ -->
+<section id="controles">
+  <h2 class="section-title"><span class="num">7</span>Ganancia y umbral de ruido</h2>
+
+  <p>
+    Cada panel tiene dos controles deslizantes en la parte inferior para afinar la calidad
+    de la transcripción de ese micrófono individualmente.
+  </p>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Controles de audio en la parte inferior del panel</span>
+    </div>
+    <div class="screen-body">┌────────────────────────────────────────────────────────┐
+│  🎙 Ganancia   <span class="dim">──────●────</span>  <span class="hl">90%</span>                        │
+│                                                        │
+│  🔇 Umbral ruido <span class="dim">────●──────</span>  <span class="dim">0.020</span>                      │
+└────────────────────────────────────────────────────────┘</div>
+  </div>
+
+  <h3>Ganancia 🎙 (Gain)</h3>
+  <p>
+    Amplifica o reduce el nivel de la señal de audio <em>antes</em> de que Whisper la procese.
+    Rango: <strong>0% – 100%</strong>, por defecto <strong>90%</strong>.
+  </p>
+
+  <table>
+    <tr><th>Valor</th><th>Cuándo usarlo</th></tr>
+    <tr><td><strong>0–40%</strong></td><td>El micrófono está muy cerca de la boca o el hablante tiene voz muy potente.</td></tr>
+    <tr><td><strong>60–90%</strong></td><td>Posición y volumen normales (valor recomendado por defecto).</td></tr>
+    <tr><td><strong>90–100%</strong></td><td>El micrófono está lejos o el hablante tiene voz baja.</td></tr>
+  </table>
+
+  <h3>Umbral de ruido 🔇 (Noise Gate)</h3>
+  <p>
+    Define el nivel mínimo de volumen a partir del cual el sistema empieza a transcribir.
+    Señales por debajo del umbral se ignoran (se tratan como silencio).
+    Rango: <strong>0.001 – 0.400</strong>, por defecto <strong>0.020</strong>.
+  </p>
+
+  <table>
+    <tr><th>Valor</th><th>Efecto</th></tr>
+    <tr><td><strong>0.005 – 0.015</strong></td><td>Umbral muy bajo: transcribe incluso susurros. Puede captar ruido de fondo.</td></tr>
+    <tr><td><strong>0.020 – 0.040</strong></td><td>Valor equilibrado para entornos con ruido moderado (valor por defecto).</td></tr>
+    <tr><td><strong>0.050 – 0.150</strong></td><td>Umbral alto: sólo transcribe voz clara. Filtra bien el ruido pero puede perder sílabas suaves.</td></tr>
+    <tr><td><strong>> 0.150</strong></td><td>Muy restrictivo. Usar sólo en entornos muy ruidosos.</td></tr>
+  </table>
+
+  <div class="callout warn">
+    <div class="callout-title">Atención — Umbral demasiado alto</div>
+    Si el umbral es muy alto, el sistema no detectará voz y el panel dirá siempre
+    "🎙 Esperando audio…". Bajar el umbral si no aparece texto al hablar.
+  </div>
+</section>
+
+<!-- ══ 8. BENCH ══════════════════════════════════════════════════════════ -->
+<section id="bench">
+  <h2 class="section-title"><span class="num">8</span>Enviar al bench</h2>
+
+  <p>
+    El <strong>bench</strong> es una zona de "descanso". Los micrófonos enviados al bench
+    se ocultan del grid pero siguen transcribiendo en segundo plano. Al ocultar paneles,
+    los paneles restantes crecen y muestran más texto.
+  </p>
+
+  <h3>Cómo enviar un micrófono al bench</h3>
+  <p>Haz clic en el botón <strong>↓</strong> en la cabecera del panel que quieres ocultar.</p>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Grid con 2 paneles activos + 2 en el bench</span>
+    </div>
+    <div class="screen-body">┌────────────────────────────────┬────────────────────────────────┐
+│ <span class="hl">●  Gerard</span>               <span class="badge e">E1</span>   │ <span class="hl2">●  Alice</span>                 <span class="badge e">E2</span>   │
+│                                │                                │
+│ Texto más largo con más        │ Much more text visible now     │
+│ espacio disponible porque      │ because only two panels are    │
+│ sólo hay dos paneles activos   │ displayed at full height…      │
+│                                │                                │
+│ El panel creció al enviar      │ Same here, expanded view       │
+│ Carlos y María al bench        │                                │
+└────────────────────────────────┴────────────────────────────────┘
+<span class="dim">BENCH ──────────────────────────────────────────────────────────────────</span>
+<span class="dim">[</span><span class="hl3">C</span><span class="dim">] Carlos ↩      [</span><span class="hl4">M</span><span class="dim">] María ↩</span></div>
+  </div>
+
+  <h3>La franja del bench</h3>
+  <p>
+    Cuando hay micrófonos en el bench, aparece una franja horizontal en la parte inferior del grid.
+    Cada chip muestra el nombre del hablante y el botón <strong>↩</strong> para restaurarlo.
+    Si un hablante en el bench dice algo, el chip parpadea en verde.
+  </p>
+
+  <h3>Restaurar desde el bench</h3>
+  <p>Haz clic en el botón <strong>↩</strong> del chip correspondiente en la franja inferior.</p>
+
+  <div class="callout tip">
+    <div class="callout-title">Consejo de uso</div>
+    En una reunión donde 2 personas hablan y el resto escucha, envía a los oyentes al bench.
+    Los 2 paneles activos crecerán para ocupar toda la pantalla y leerás el texto con comodidad.
+  </div>
+</section>
+
+<!-- ══ 9. VISTA ENFOCADA ═════════════════════════════════════════════════ -->
+<section id="focus">
+  <h2 class="section-title"><span class="num">9</span>Vista enfocada (Focus)</h2>
+
+  <p>
+    La Vista Enfocada sustituye la cuadrícula por un <strong>feed cronológico</strong> con todos
+    los mensajes de todos los micrófonos activos, acompañado de un panel lateral (sidebar)
+    para los micrófonos enviados al bench.
+  </p>
+  <p>Activa la Vista Enfocada pulsando el botón <strong>⊞ Focus</strong> en la barra superior.</p>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Vista Enfocada — estructura general</span>
+    </div>
+    <div class="screen-body">┌──────────────────────────────────────────┬────────────────────┐
+│  FEED PRINCIPAL                          │ SIDEBAR / BENCH    │
+│  <span class="dim">Hover sobre un mensaje y pulsa 🔇 para</span>   │                    │
+│  <span class="dim">moverlo al bench</span>                          │ <span class="dim">Bench</span>  <span class="dim">[2]</span>         │
+│  ─────────────────────────────────────   │ ─────────────────  │
+│  <span class="dim">14:22:45</span>  <span class="hl">Gerard</span>: Buenos días a todos,  │ <span class="hl3">C</span> Carlos           │
+│            vamos a empezar la reunión.   │ "…presupuesto…"    │
+│                                          │ ↩ Restore          │
+│  <span class="dim">14:22:58</span>  <span class="hl2">Alice</span>: Good morning everyone! │ ─────────────────  │
+│                                          │ <span class="hl4">M</span> María     <span class="dim">●</span>      │
+│  <span class="dim">14:23:10</span>  <span class="hl">Gerard</span>: El presupuesto 🔇     │ "…costes…"         │
+│            del Q1 es de cien mil euros.  │ ↩ Restore          │
+│                                          │                    │
+│  <span class="dim">14:23:22</span>  <span class="hl2">Alice</span>: I agree with that      │                    │
+│            figure for the first quarter. │                    │
+│                                          │                    │
+│  <span class="dim">[auto-scroll activo]</span>                       │                    │
+└──────────────────────────────────────────┴────────────────────┘</div>
+  </div>
+
+  <h3>Feed principal</h3>
+  <table>
+    <tr><th>Elemento</th><th>Descripción</th></tr>
+    <tr><td><strong>Timestamp</strong></td><td>Hora exacta de cada segmento transcrito (HH:MM:SS).</td></tr>
+    <tr><td><strong>Nombre coloreado</strong></td><td>Identifica al hablante. Clic en el nombre para moverlo al bench o restaurarlo.</td></tr>
+    <tr><td><strong>Texto</strong></td><td>La transcripción del segmento.</td></tr>
+    <tr><td><strong>Botón 🔇</strong></td><td>Aparece al pasar el cursor por encima. Mueve al hablante al bench (oculta sus futuros mensajes del feed).</td></tr>
+  </table>
+
+  <h3>Sidebar (Bench)</h3>
+  <p>
+    El sidebar derecho muestra los micrófonos que están en el bench. Para cada uno muestra:
+  </p>
+  <ul>
+    <li>Nombre del hablante con su color.</li>
+    <li>Último fragmento transcrito (máximo 55 caracteres).</li>
+    <li>Punto verde parpadeante <strong>●</strong> cuando ese hablante está diciendo algo en este momento.</li>
+    <li>Botón <strong>↩ Restore</strong> para volver a mostrar sus mensajes en el feed.</li>
+  </ul>
+
+  <div class="callout tip">
+    <div class="callout-title">Cuándo usar la Vista Enfocada</div>
+    Es ideal para seguir una conversación como si fuera un chat en tiempo real,
+    especialmente cuando hay muchos hablantes y quieres leer el flujo cronológico
+    sin dividir la pantalla. El feed acumula hasta 300 mensajes.
+  </div>
+</section>
+
+<!-- ══ 10. PERFILES ══════════════════════════════════════════════════════ -->
+<section id="perfiles">
+  <h2 class="section-title"><span class="num">10</span>Perfiles de configuración</h2>
+
+  <p>
+    Los perfiles permiten guardar toda la configuración de una sesión y recuperarla con un clic
+    en futuras sesiones. Cada perfil recuerda el nombre de cada micrófono, la ganancia,
+    el umbral de ruido, el tamaño de letra y qué micrófonos estaban en el bench.
+  </p>
+
+  <h3>Qué guarda un perfil</h3>
+  <table>
+    <tr><th>Dato</th><th>Descripción</th></tr>
+    <tr><td><strong>Nombre del hablante</strong></td><td>El nombre visible en el panel (por ejemplo "Gerard", "Alice").</td></tr>
+    <tr><td><strong>Ganancia</strong></td><td>El valor del deslizador de ganancia (0–100%).</td></tr>
+    <tr><td><strong>Umbral de ruido</strong></td><td>El valor del noise gate (0.001–0.400).</td></tr>
+    <tr><td><strong>Estado de bench</strong></td><td>Si el micrófono estaba en el bench o activo en el grid.</td></tr>
+    <tr><td><strong>Tamaño de letra</strong></td><td>El tamaño de fuente global (11–22 px).</td></tr>
+  </table>
+  <p>
+    Los perfiles se identifican por el <strong>puerto USB</strong> del receptor (PORT1L, PORT1R, etc.),
+    no por el número de dispositivo. Esto significa que el perfil funciona correctamente
+    aunque el sistema asigne un número diferente al dispositivo en cada reinicio.
+  </p>
+
+  <h3>Guardar un perfil</h3>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Sección Perfiles dentro del panel de Ajustes</span>
+    </div>
+    <div class="screen-body">  PERFILES DE CONFIGURACIÓN
+  ─────────────────────────────────────────────────
+  ┌─────────────────────────────────────────────┐
+  │  Reunión Q1                                 │
+  │  Gerard · Alice · Carlos [bench] · 13px     │
+  │                      [Aplicar]  [🗑]         │
+  ├─────────────────────────────────────────────┤
+  │  Entrevista podcast                         │
+  │  Entrevistador · Invitado · 16px            │
+  │                      [Aplicar]  [🗑]         │
+  └─────────────────────────────────────────────┘
+
+  ┌────────────────────────────┐
+  │  Nombre del perfil…        │  ← escribir el nombre aquí
+  └────────────────────────────┘
+  [  Guardar actual  ]
+
+  Guarda ganancia, umbral de ruido y tamaño de letra.</div>
+  </div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        Configura todos los micrófonos: <strong>renombra</strong> cada uno, ajusta
+        <strong>ganancia</strong> y <strong>umbral</strong>, y pon en el <strong>bench</strong>
+        los que no vas a necesitar.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        Abre <strong>⚙ Settings</strong> → sección <em>Perfiles de configuración</em>.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        Escribe un nombre descriptivo en el campo de texto (por ejemplo "Reunión Q1").
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        Haz clic en <strong>Guardar actual</strong>. Si ya existe un perfil con ese nombre,
+        se sobreescribe.
+      </div>
+    </div>
+  </div>
+
+  <h3>Aplicar un perfil</h3>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">Inicia el servidor y abre la aplicación en el navegador.</div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">Abre <strong>⚙ Settings</strong> → sección <em>Perfiles de configuración</em>.</div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        Haz clic en <strong>Aplicar</strong> junto al perfil deseado. El sistema restaurará
+        nombres, ganancias, umbrales, bench y tamaño de letra automáticamente.
+      </div>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <div class="callout-title">Si los nombres no se restauran</div>
+    Los perfiles guardados <em>antes</em> de la última actualización del software no incluyen
+    nombres de hablantes. Al aplicarlos verás el aviso:
+    <em>"⚠️ guarda el perfil de nuevo para incluir nombres"</em>.
+    Solución: renombra los micrófonos, abre Ajustes y vuelve a guardar el perfil con el mismo nombre.
+  </div>
+
+  <h3>Eliminar un perfil</h3>
+  <p>
+    Haz clic en el icono <strong>🗑</strong> junto al perfil. Aparecerá una confirmación antes
+    de eliminarlo.
+  </p>
+</section>
+
+<!-- ══ 11. PANEL DE AJUSTES ══════════════════════════════════════════════ -->
+<section id="ajustes">
+  <h2 class="section-title"><span class="num">11</span>Panel de ajustes</h2>
+
+  <p>
+    El panel de ajustes se abre pulsando <strong>⚙ Settings</strong> en la barra superior.
+    Contiene configuración avanzada del sistema.
+  </p>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Panel de ajustes — estructura</span>
+    </div>
+    <div class="screen-body">                              ┌────────────────────────────┐
+                              │ Settings                   │
+                              │ ─────────────────────────  │
+                              │ DISPOSITIVOS ACTIVOS        │
+                              │ <span class="hl2">● Active</span>  Wireless Mic Rx  │
+                              │   PORT1L · pci-usb-0:1:1   │
+                              │ <span class="hl2">● Active</span>  Wireless Mic Rx  │
+                              │   PORT2L · pci-usb-0:2:1   │
+                              │ <span class="dim">○ Idle</span>    ALC289 Analog    │
+                              │ ─────────────────────────  │
+                              │ POOL (WHISPER GPU)          │
+                              │ Slot 1: [Gerard         ▾] │
+                              │ Slot 2: [Alice          ▾] │
+                              │ Slot 3: [— shared pool —▾] │
+                              │ Slot 4: [— shared pool —▾] │
+                              │ ─────────────────────────  │
+                              │ PANTALLA                    │
+                              │ ☑ Auto-scroll activo       │
+                              │ ─────────────────────────  │
+                              │ PERFILES DE CONFIGURACIÓN  │
+                              │  [ver sección 10]           │
+                              │ ─────────────────────────  │
+                              │         [ Close ]          │
+                              └────────────────────────────┘</div>
+  </div>
+
+  <h3>Dispositivos activos</h3>
+  <p>
+    Lista todos los dispositivos de audio detectados por el sistema. Los que tienen
+    <span style="color:var(--lime)"><strong>● Active</strong></span> están capturando audio en este momento.
+    <span style="color:var(--text-dim)"><strong>○ Idle</strong></span> indica que el dispositivo existe
+    pero no está asignado como fuente de transcripción.
+  </p>
+
+  <h3>Auto-scroll</h3>
+  <p>
+    Cuando está activado, los paneles del grid y el feed de la Vista Enfocada se desplazan
+    automáticamente al mensaje más reciente. Desmárcalo si quieres leer el historial
+    sin que la pantalla salte.
+  </p>
+</section>
+
+<!-- ══ 12. POOLS (GPU) ══════════════════════════════════════════════════ -->
+<section id="pool">
+  <h2 class="section-title"><span class="num">12</span>Asignación de GPUs (Pools)</h2>
+
+  <p>
+    El sistema usa 5 instancias de Whisper corriendo simultáneamente en la GPU.
+    Las 4 primeras son <strong>slots exclusivos</strong> (una instancia por micrófono).
+    La quinta es un <strong>pool compartido</strong> para todos los demás micrófonos.
+  </p>
+
+  <table>
+    <tr><th>Badge</th><th>Tipo</th><th>Comportamiento</th></tr>
+    <tr>
+      <td><span class="badge e">E1</span> <span class="badge e">E2</span> <span class="badge e">E3</span> <span class="badge e">E4</span></td>
+      <td><strong>Slot exclusivo</strong></td>
+      <td>Una instancia de Whisper dedicada al 100% para ese micrófono. Mayor velocidad y menor latencia. Máximo 4 micrófonos exclusivos.</td>
+    </tr>
+    <tr>
+      <td><span class="badge sh">SH</span></td>
+      <td><strong>Pool compartido</strong></td>
+      <td>Varios micrófonos comparten una instancia de Whisper en turno rotativo. Latencia ligeramente mayor cuando hablan simultáneamente.</td>
+    </tr>
+  </table>
+
+  <h3>Cómo asignar slots exclusivos</h3>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">Abre <strong>⚙ Settings</strong> → sección <em>Pool (Whisper GPU)</em>.</div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        Cada dropdown (Slot 1 a Slot 4) muestra <em>"— shared pool —"</em> por defecto.
+        Abre el dropdown del slot que quieres asignar y selecciona el micrófono.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        El badge del panel cambiará de <span class="badge sh">SH</span> a
+        <span class="badge e">E1</span> (o el número correspondiente) inmediatamente.
+      </div>
+    </div>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-title">Recomendación</div>
+    Asigna slots exclusivos a los micrófonos que más hablan o cuya transcripción es más crítica.
+    Los micrófonos de oyentes o participantes secundarios pueden quedarse en el pool compartido.
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">Nota técnica</div>
+    Los slots exclusivos E1–E4 usan int8 en CUDA. El pool compartido (E5 interno) también,
+    pero sirve a múltiples fuentes en ronda. La diferencia es perceptible principalmente
+    cuando 3 o más micrófonos hablan al mismo tiempo.
+  </div>
+</section>
+
+<!-- ══ 13. MÓVIL ═════════════════════════════════════════════════════════ -->
+<section id="movil">
+  <h2 class="section-title"><span class="num">13</span>Uso en móvil / tablet</h2>
+
+  <p>
+    La aplicación es totalmente responsiva y funciona en navegadores móviles
+    (Chrome, Safari, Firefox para Android/iOS).
+  </p>
+
+  <h3>Diferencias en pantalla pequeña</h3>
+
+  <div class="screen">
+    <div class="screen-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span style="margin-left:8px">Vista Grid en móvil (4 micrófonos → 2×2)</span>
+    </div>
+    <div class="screen-body">┌──────────────────┬──────────────────┐
+│ <span class="hl">G</span> Gerard   <span class="badge e">E1</span>   │ <span class="hl2">A</span> Alice   <span class="badge e">E2</span>   │
+│                  │                  │
+│ …texto…          │ …texto…          │
+│ ▁▃▅▇▅▃▁          │ ▁▁▁▁▁▁▁          │
+├──────────────────┼──────────────────┤
+│ <span class="hl3">C</span> Carlos  <span class="badge sh">SH</span>   │ <span class="hl4">M</span> María   <span class="badge sh">SH</span>   │
+│                  │                  │
+│ 🎙 Esperando…    │ 🎙 Esperando…    │
+│ ▁▁▁▁▁▁▁          │ ▁▁▁▁▁▁▁          │
+└──────────────────┴──────────────────┘</div>
+  </div>
+
+  <table>
+    <tr><th>Función</th><th>Comportamiento en móvil</th></tr>
+    <tr><td>Grid</td><td>Máximo 2 columnas, filas automáticas según micrófonos.</td></tr>
+    <tr><td>Sidebar de Focus</td><td>Se oculta y se abre como cajón deslizante con el botón <strong>🔇 Bench N</strong> en la cabecera del feed.</td></tr>
+    <tr><td>Settings</td><td>Panel lateral ocupa el 90% del ancho de pantalla.</td></tr>
+    <tr><td>Renombrar</td><td>Toca el nombre → menú contextual → Editar.</td></tr>
+    <tr><td>Zoom</td><td>Desactivado para evitar accidentes (uso del deslizador de fuente en su lugar).</td></tr>
+  </table>
+
+  <div class="callout tip">
+    <div class="callout-title">Consejo para móvil</div>
+    Usa la <strong>Vista Enfocada</strong> en móvil para leer el feed cronológico cómodamente.
+    Es más legible que el grid 2×N cuando hay muchos micrófonos activos.
+  </div>
+</section>
+
+<!-- ══ 14. FAQ ═══════════════════════════════════════════════════════════ -->
+<section id="problemas">
+  <h2 class="section-title"><span class="num">14</span>Preguntas frecuentes</h2>
+
+  <h3>No aparece ningún micrófono en la pantalla</h3>
+  <ul>
+    <li>Verificar que el servidor <code>app.py</code> está en ejecución.</li>
+    <li>Comprobar que los receptores están conectados por USB <em>antes</em> de arrancar el servidor.</li>
+    <li>Revisar que el punto de estado en la barra superior esté en verde (conectado).</li>
+  </ul>
+
+  <h3>El texto no aparece aunque el hablante está hablando</h3>
+  <ul>
+    <li>Bajar el <strong>umbral de ruido</strong> (deslizar hacia la izquierda). Puede estar demasiado alto.</li>
+    <li>Subir la <strong>ganancia</strong> si el micrófono capta poco volumen.</li>
+    <li>Comprobar que el indicador <span class="badge live">● LIVE</span> aparece en el panel cuando el hablante habla. Si no aparece, el audio no está llegando.</li>
+  </ul>
+
+  <h3>El sistema transcribe palabras inventadas o números (alucinaciones)</h3>
+  <ul>
+    <li>El modelo puede inventar texto cuando recibe audio casi silencioso. Subir el <strong>umbral de ruido</strong> para que esos momentos se filtren como silencio.</li>
+    <li>El sistema tiene un filtro automático de alucinaciones (secuencias repetitivas, números consecutivos), pero ajustar el umbral es la solución principal.</li>
+  </ul>
+
+  <h3>El perfil aplicado no restaura los nombres</h3>
+  <ul>
+    <li>El perfil fue guardado con una versión anterior del software que no incluía nombres. Renombra los micrófonos manualmente y vuelve a guardar el perfil.</li>
+    <li>Si al aplicar aparece el aviso <em>"⚠️ guarda el perfil de nuevo para incluir nombres"</em>, ese es exactamente el caso.</li>
+  </ul>
+
+  <h3>La pantalla se queda en blanco / "Disconnected"</h3>
+  <ul>
+    <li>El servidor se detuvo o la conexión de red se interrumpió. La aplicación intenta reconectarse automáticamente. Si el servidor volvió a arrancar, la página se recuperará sola en unos segundos.</li>
+  </ul>
+
+  <h3>¿Cómo sé qué slot de GPU está usando cada micrófono?</h3>
+  <ul>
+    <li>El badge en la esquina superior derecha de cada panel lo indica: <span class="badge e">E1</span>–<span class="badge e">E4</span> para slots exclusivos, <span class="badge sh">SH</span> para el pool compartido.</li>
+    <li>Para cambiar la asignación, ir a <strong>⚙ Settings → Pool (Whisper GPU)</strong>.</li>
+  </ul>
+
+  <h3>¿Los datos de transcripción se guardan en algún sitio?</h3>
+  <ul>
+    <li>El historial se guarda en memoria mientras el servidor está activo. Al reiniciar el servidor el historial se pierde. Los perfiles (nombres, ganancias, etc.) se guardan en el <strong>localStorage del navegador</strong> y persisten entre reinicios.</li>
+  </ul>
+</section>
+
+</div><!-- /content -->
+
+<footer>
+  <strong style="color:var(--accent)">Live Transcript</strong> &nbsp;·&nbsp;
+  Manual de Usuario v1.0 &nbsp;·&nbsp;
+  Generado el 5 de mayo de 2026
+</footer>
+
+</body>
+</html>

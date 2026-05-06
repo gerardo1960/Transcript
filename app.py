@@ -342,6 +342,11 @@ async def serve_ui():
     html_path = Path(__file__).parent / "static" / "index.html"
     return FileResponse(str(html_path))
 
+@app.get("/manual.html", response_class=HTMLResponse)
+async def serve_manual():
+    html_path = Path(__file__).parent / "static" / "manual.html"
+    return FileResponse(str(html_path))
+
 @app.get("/api/speakers")
 async def get_speakers():
     return {"speakers": list(active_speakers.values()), "count": len(active_speakers)}

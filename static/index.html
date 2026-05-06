@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Live Transcription</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -44,6 +44,8 @@
       font-family: var(--font-ui);
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
+      /* iOS Safari: fill the safe area */
+      padding-bottom: env(safe-area-inset-bottom);
     }
 
     /* ─── Layout ─────────────────────────────────────────────────────── */
@@ -51,7 +53,8 @@
       display: flex;
       flex-direction: column;
       width: 100vw;
-      height: 100vh;
+      height: 100vh;           /* fallback */
+      height: 100dvh;          /* dynamic: shrinks when Safari toolbar appears */
     }
 
     /* Top bar */
@@ -1018,6 +1021,44 @@
     .sidebar-restore-btn:hover { border-color: var(--accent); color: var(--accent); }
 
     /* ─── Mobile Focus View ──────────────────────────────────────────── */
+    /* ─── Tablet / iPad compact panel (≤ 1024px) ──────────────────────── */
+    @media (max-width: 1024px) {
+      /* Header: less padding, hide serial, smaller avatar */
+      .panel-header {
+        padding: 8px 12px 6px;
+        flex-wrap: nowrap;
+        min-height: 0;
+      }
+      .speaker-avatar {
+        width: 28px; height: 28px;
+        font-size: 12px;
+        flex-shrink: 0;
+      }
+      .speaker-name-wrap { gap: 6px; }
+      .panel-serial { display: none; }       /* hide #PORT1L on small screens */
+      .lang-tag { display: none; }           /* hide ES/EN — saves ~34px */
+      .panel-actions { gap: 4px; }
+      .panel-btn { width: 26px; height: 26px; font-size: 13px; }
+      .pool-badge { display: none; }         /* pool badge in settings, not needed in header */
+      .live-indicator { display: none; }     /* "LIVE" takes space; speaking glow is enough */
+
+      /* Mic controls: compact — clip label text, show only emoji */
+      .mic-controls { padding: 4px 12px 6px; gap: 4px; }
+      .mic-control-row { gap: 6px; }
+      .mic-control-row label {
+        min-width: 22px; max-width: 22px;
+        overflow: hidden; white-space: nowrap;
+        font-size: 15px; line-height: 1;
+      }
+      .mic-control-val { font-size: 11px; min-width: 34px; }
+
+      /* Waveform: slimmer */
+      .waveform-bar { height: 24px; }
+
+      /* Transcript: tighter padding */
+      .transcript-area { padding: 10px 12px; gap: 6px; }
+    }
+
     @media (max-width: 768px) {
       #focus-sidebar-toggle { display: flex; }
 
@@ -1322,7 +1363,7 @@
           <span class="speaker-name" id="name-${sp.device_id}"
                 onclick="showNameMenu(${sp.device_id}, event)"
                 title="Tap to edit name">${sp.name}</span>
-          <span style="font-family:var(--font-mono);font-size:14px;color:var(--speaker-color);margin-left:4px;opacity:0.8" title="Serial">#${sp.serial || sp.device_id}</span>
+          <span class="panel-serial" style="font-family:var(--font-mono);font-size:14px;color:var(--speaker-color);margin-left:4px;opacity:0.8" title="Serial">#${sp.serial || sp.device_id}</span>
           <span class="lang-tag" id="lang-${sp.device_id}">—</span>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
@@ -1746,11 +1787,12 @@
   function updateGridLayout() {
     const visible = speakerOrder.filter(id => !mutedSpeakers.has(id)).length;
     const grid    = document.getElementById('grid');
-    const mobile  = window.innerWidth < 768;
+    const w       = window.innerWidth;
+    // ≤ 768 = phone, ≤ 1024 = tablet/iPad portrait → cap at 2 columns
+    const tablet  = w <= 1024;
 
     let cols, rows;
-    if (mobile) {
-      // Mobile: max 2 columns, auto rows
+    if (tablet) {
       cols = visible <= 1 ? 1 : 2;
       rows = Math.ceil(visible / cols);
     } else {
