@@ -57,8 +57,14 @@ active_speakers: Dict[int, dict] = {}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def extract_serial(pw_node_name: str) -> str:
+def extract_serial(pw_node_name: str, bus_path: str = "") -> str:
     import re
+    # Use USB port path when available — stable and unique even when USB serial is identical
+    if bus_path:
+        m = re.search(r'usb-\d+:(\d+(?:\.\d+)*)', bus_path)
+        if m:
+            port = m.group(1).replace(".", "_")
+            return f"PORT{port}"
     m = re.search(r'USB_Composite_Device_([A-F0-9]+)-', pw_node_name, re.IGNORECASE)
     if m:
         return m.group(1)[-4:].upper()
@@ -149,7 +155,7 @@ async def startup():
     for device in usb_devices:
         if name_idx >= len(default_names):
             break
-        serial = extract_serial(device.pw_node_name)
+        serial = extract_serial(device.pw_node_name, device.bus_path)
         if device.is_stereo:
             for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
                 if name_idx >= len(default_names):
@@ -245,7 +251,7 @@ async def pipewire_watchdog():
                     )
                     for device in usb_devices:
                         if device.id not in active_speakers:
-                            serial = extract_serial(device.pw_node_name)
+                            serial = extract_serial(device.pw_node_name, device.bus_path)
                             if device.is_stereo:
                                 for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
                                     name = f"Speaker {len(active_speakers) + 1}"
@@ -291,7 +297,7 @@ async def hotplug_scanner():
             )
             for device in usb_devices:
                 if device.id not in active_speakers and not device.active:
-                    serial = extract_serial(device.pw_node_name)
+                    serial = extract_serial(device.pw_node_name, device.bus_path)
                     if device.is_stereo:
                         for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
                             name = f"Speaker {len(active_speakers) + 1}"
@@ -382,7 +388,7 @@ async def add_speaker(req: AddSpeakerRequest):
         return {"success": False, "error": "Device not found"}
     if device.active:
         return {"success": False, "error": "Device already active"}
-    serial = extract_serial(device.pw_node_name)
+    serial = extract_serial(device.pw_node_name, device.bus_path)
     active_speakers[device.id] = {
         "device_id": device.id, "name": req.name, "serial": serial,
         "pw_node_name": device.pw_node_name, "mac": device.mac_address,

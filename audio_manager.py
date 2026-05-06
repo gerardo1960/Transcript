@@ -36,6 +36,7 @@ class AudioDevice:
     callback: Optional[Callable] = None
     is_stereo: bool = False          # True for DJI wireless receivers (L+R channels)
     stereo_right_id: Optional[int] = None  # Virtual device ID for the R channel
+    bus_path: str = ""               # USB bus-path (stable across reboots per port)
 
 
 class PipeWireAudioManager:
@@ -78,6 +79,15 @@ class PipeWireAudioManager:
             nodes = json.loads(stdout.decode())
             devices = []
 
+            # First pass: build device_obj_id → bus_path from Interface:Device objects
+            bus_path_map: Dict[int, str] = {}
+            for obj in nodes:
+                if obj.get("type") != "PipeWire:Interface:Device":
+                    continue
+                bp = obj.get("info", {}).get("props", {}).get("device.bus-path", "")
+                if bp:
+                    bus_path_map[obj.get("id", -1)] = bp
+
             for node in nodes:
                 if node.get("type") != "PipeWire:Interface:Node":
                     continue
@@ -98,6 +108,9 @@ class PipeWireAudioManager:
                 # Prefer Bluetooth devices, but also allow all sources for testing
                 is_bt = "bluez" in node_name.lower() or mac is not None
 
+                device_obj_id = props.get("device.id", -1)
+                bus_path = bus_path_map.get(device_obj_id, "")
+
                 is_stereo = "wireless_mic_rx" in node_name.lower()
                 device = AudioDevice(
                     id=node_id,
@@ -107,11 +120,12 @@ class PipeWireAudioManager:
                     active=False,
                     is_stereo=is_stereo,
                     stereo_right_id=node_id + 10000 if is_stereo else None,
+                    bus_path=bus_path,
                 )
 
                 devices.append(device)
                 self.devices[node_id] = device
-                logger.info(f"Discovered {'BT ' if is_bt else ''}device: {nick} (id={node_id})")
+                logger.info(f"Discovered {'BT ' if is_bt else ''}device: {nick} (id={node_id}, bus={bus_path})")
 
             return devices
 
