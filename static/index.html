@@ -1910,9 +1910,16 @@
       savedList.style.left     = inputRect.left + 'px';
       savedList.style.minWidth = Math.max(inputRect.width, 180) + 'px';
 
-      // Prevent the list from causing input blur on both mouse and touch
+      // Desktop: prevent mousedown from blurring the input before click fires
       savedList.addEventListener('mousedown', (e) => e.preventDefault());
-      savedList.addEventListener('touchstart', (e) => e.preventDefault(), {passive: false});
+      // NOTE: do NOT preventDefault on touchstart at list level — it would swallow click events on iOS
+
+      const selectName = (name) => {
+        input.value = name;
+        savedList?.remove();
+        savedList = null;
+        input.blur();
+      };
 
       saved.forEach(name => {
         const item = document.createElement('div');
@@ -1921,17 +1928,28 @@
         const txt = document.createElement('span');
         txt.className = 'name-txt';
         txt.textContent = name;
-        txt.onclick = () => { input.value = name; savedList.remove(); savedList = null; input.blur(); };
+
+        // Mouse click (desktop)
+        txt.addEventListener('click', () => selectName(name));
+        // Touch tap (iOS/iPad) — use touchend to avoid 300ms delay + blur race
+        txt.addEventListener('touchend', (e) => { e.preventDefault(); selectName(name); }, {passive: false});
 
         const del = document.createElement('span');
         del.className = 'saved-name-del';
         del.textContent = '×';
-        del.onclick = (e) => {
+        del.addEventListener('click', (e) => {
           e.stopPropagation();
           deleteNameFromList(name);
           item.remove();
-          if (!savedList.querySelector('.saved-name-item')) { savedList.remove(); savedList = null; }
-        };
+          if (savedList && !savedList.querySelector('.saved-name-item')) { savedList.remove(); savedList = null; }
+        });
+        del.addEventListener('touchend', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          deleteNameFromList(name);
+          item.remove();
+          if (savedList && !savedList.querySelector('.saved-name-item')) { savedList.remove(); savedList = null; }
+        }, {passive: false});
 
         item.appendChild(txt);
         item.appendChild(del);

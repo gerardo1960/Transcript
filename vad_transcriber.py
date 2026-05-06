@@ -29,6 +29,7 @@ MIN_ENERGY               = 0.002
 SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~3s)
 TAIL_SILENCE_SECS        = 0.5  # tail silence in pending audio → phrase boundary
 MAX_WAIT_SECS            = 3.0  # force transcription if no phrase boundary for this long
+WHISPER_TIMEOUT_SECS     = 25   # kill a hung Whisper call after this many seconds
 
 NUM_POOLS       = 5
 EXCLUSIVE_SLOTS = 4   # pools 0-3
@@ -37,19 +38,30 @@ SHARED_POOL     = 4   # pool 4
 
 def _looks_like_hallucination(text: str) -> bool:
     """Catch repetitive / counting hallucinations that Whisper produces on near-silent audio."""
+    # ── Pattern 1: dot-chained repetition without spaces ("I...I...I..." or "You.You.You.") ──
+    # Split on punctuation runs and check if a single short token dominates
+    punct_tokens = [t.strip() for t in re.split(r'[.\s]+', text) if t.strip()]
+    if len(punct_tokens) >= 6:
+        counts_p = Counter(t.lower() for t in punct_tokens)
+        top_p = counts_p.most_common(1)[0][1]
+        if top_p / len(punct_tokens) > 0.5:
+            return True
+
+    # ── Pattern 2: word-level repetition ──
     words = text.split()
     if len(words) < 4:
         return False
     tokens = [re.sub(r"[.,!?;:\-]", "", w).lower() for w in words]
-    # Same token dominates (e.g. repeated phrase)
     counts = Counter(tokens)
     top_count = counts.most_common(1)[0][1]
     if top_count / len(tokens) > 0.25:
         return True
-    # Mostly numbers → counting hallucination ("1, 2, 3, 4, 5...")
+
+    # ── Pattern 3: mostly numbers ("1, 2, 3, 4, 5...") ──
     number_tokens = sum(1 for t in tokens if re.fullmatch(r"\d+", t))
     if number_tokens / len(tokens) > 0.35:
         return True
+
     return False
 
 
@@ -109,7 +121,15 @@ class WhisperTranscriber:
         self._busy = True
         try:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(self._executor, lambda: self._transcribe_sync(audio))
+            fut  = loop.run_in_executor(self._executor, lambda: self._transcribe_sync(audio))
+            return await asyncio.wait_for(fut, timeout=WHISPER_TIMEOUT_SECS)
+        except asyncio.TimeoutError:
+            # The GPU thread is stuck — replace the executor so the pool is usable again.
+            # The old stuck thread will eventually die on its own.
+            logger.warning(f"Whisper timeout after {WHISPER_TIMEOUT_SECS}s — recycling executor")
+            self._executor.shutdown(wait=False)
+            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper")
+            return None
         except Exception as e:
             logger.error(f"Transcription error: {e}")
             return None
@@ -126,6 +146,7 @@ class WhisperTranscriber:
             no_speech_threshold=0.6,
             condition_on_previous_text=False,
             initial_prompt=" ",
+            max_new_tokens=200,   # cap token generation — prevents infinite loops on bad audio
         )
 
         self.last_detected_language             = info.language
