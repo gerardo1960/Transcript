@@ -126,34 +126,7 @@
       overflow: hidden;
     }
 
-    /* ─── Dynamic grid layouts ──────────────────────────────────────── */
-    #grid[data-count="1"] {
-      grid-template-columns: 1fr;
-      grid-template-rows: 1fr;
-    }
-    #grid[data-count="2"] {
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: 1fr;
-    }
-    #grid[data-count="3"] {
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: 1fr 1fr;
-    }
-    /* 3-speaker: first panel spans full left column */
-    #grid[data-count="3"] .speaker-panel:nth-child(1) {
-      grid-row: 1 / 3;
-    }
-    #grid[data-count="4"] {
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: 1fr 1fr;
-    }
-    #grid[data-count="5"],
-    #grid[data-count="6"],
-    #grid[data-count="7"],
-    #grid[data-count="8"] {
-      grid-template-columns: repeat(4, 1fr);
-      grid-template-rows: 1fr 1fr;
-    }
+    /* Grid layout is set dynamically by JS (updateGridLayout) */
 
     /* ─── Speaker Panel ──────────────────────────────────────────────── */
     .speaker-panel {
@@ -679,17 +652,97 @@
     .saved-name-del:hover { color: var(--sp2); background: rgba(255,112,67,0.15); }
 
     /* ─── Responsive ─────────────────────────────────────────────────── */
-    @media (max-width: 600px) {
-      #grid[data-count="2"],
-      #grid[data-count="3"],
-      #grid[data-count="4"] {
-        grid-template-columns: 1fr;
-        grid-template-rows: repeat(auto-fill, minmax(200px, 1fr));
-      }
-      #grid[data-count="3"] .speaker-panel:nth-child(1) {
-        grid-row: auto;
-      }
+    /* Mobile grid layout handled by JS via updateGridLayout() */
+
+    /* ─── New-text flash ────────────────────────────────────────────── */
+    .speaker-panel.new-text {
+      border-color: #ffffff !important;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.75), 0 0 28px -4px rgba(255,255,255,0.35) !important;
     }
+
+    /* ─── Benched panel (hidden from grid) ──────────────────────────── */
+    .speaker-panel.benched { display: none !important; }
+
+    /* ─── Bench Strip ────────────────────────────────────────────────── */
+    #bench-strip {
+      flex-shrink: 0;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      overflow-x: auto;
+      min-height: 50px;
+    }
+    #bench-strip.visible { display: flex; }
+    #bench-strip::-webkit-scrollbar { height: 3px; }
+    #bench-strip::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .bench-strip-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      flex-shrink: 0;
+      padding-right: 4px;
+      border-right: 1px solid var(--border);
+      margin-right: 4px;
+    }
+
+    .bench-chip {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 10px 5px 7px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      flex-shrink: 0;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    .bench-chip.chip-speaking {
+      border-color: var(--sp1);
+      box-shadow: 0 0 8px -2px var(--sp1);
+    }
+
+    .bench-chip-av {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 11px;
+      border-width: 1.5px;
+      border-style: solid;
+      flex-shrink: 0;
+    }
+
+    .bench-chip-name {
+      font-family: var(--font-display);
+      font-size: 13px;
+      font-weight: 700;
+      max-width: 90px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bench-chip-restore {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px 7px;
+      font-size: 11px;
+      cursor: pointer;
+      color: var(--text-dim);
+      transition: all var(--transition);
+      white-space: nowrap;
+    }
+    .bench-chip-restore:hover { border-color: var(--accent); color: var(--accent); }
 
     /* ─── View Toggle ────────────────────────────────────────────────── */
     #view-toggle-btn {
@@ -981,13 +1034,7 @@
       #focus-sidebar.drawer-open { transform: translateX(0); }
       #focus-main { border-right: none; }
 
-      #grid[data-count="5"],
-      #grid[data-count="6"],
-      #grid[data-count="7"],
-      #grid[data-count="8"] {
-        grid-template-columns: repeat(2, 1fr);
-        grid-template-rows: repeat(4, 1fr);
-      }
+      /* mobile grid layout handled by JS */
     }
 
     #sidebar-overlay {
@@ -1025,6 +1072,11 @@
 
   <!-- Speaker Grid -->
   <main id="grid" data-count="0"></main>
+
+  <!-- Bench Strip (Grid View) -->
+  <div id="bench-strip">
+    <span class="bench-strip-label">Bench</span>
+  </div>
 
   <!-- Focus Stream View -->
   <div id="focus-view">
@@ -1243,6 +1295,11 @@
     const av = document.getElementById(`avatar-${deviceId}`);
     if (av) av.textContent = name[0].toUpperCase();
     SPEAKER_INITIALS[deviceId] = name[0].toUpperCase();
+    // Sync bench chip and sidebar names
+    const chipName = document.querySelector(`#bench-chip-${deviceId} .bench-chip-name`);
+    if (chipName) chipName.textContent = name;
+    const sidebarName = document.querySelector(`#sidebar-sp-${deviceId} .sidebar-sp-name`);
+    if (sidebarName) sidebarName.textContent = name;
   }
 
   function buildPanel(sp) {
@@ -1275,6 +1332,7 @@
           </div>
           <div class="panel-actions">
             <span class="pool-badge" id="pool-badge-${sp.device_id}" style="font-family:var(--font-mono);font-size:10px;padding:2px 7px;border-radius:4px;background:var(--border);color:var(--text-dim);">P?</span>
+            <button class="panel-btn" onclick="benchSpeaker(${sp.device_id})" title="Move to bench">↓</button>
             <button class="panel-btn" onclick="clearPanel(${sp.device_id})" title="Clear">✕</button>
           </div>
         </div>
@@ -1338,12 +1396,25 @@
 
     // ── Focus view routing ──
     if (mutedSpeakers.has(data.device_id)) {
-      // Update sidebar snippet and animate
       const snippetEl = document.getElementById(`sidebar-snippet-${data.device_id}`);
       if (snippetEl) snippetEl.textContent = data.text.slice(0, 60);
       markSidebarSpeaking(data.device_id);
+      // Pulse bench chip
+      const chip = document.getElementById(`bench-chip-${data.device_id}`);
+      if (chip) {
+        chip.classList.add('chip-speaking');
+        clearTimeout(speakingTimers[`chip-${data.device_id}`]);
+        speakingTimers[`chip-${data.device_id}`] = setTimeout(() => chip.classList.remove('chip-speaking'), 2500);
+      }
     } else {
       appendToFocusFeed(data, animate);
+      // Flash white border on grid panel for 2s
+      const panel = document.getElementById(`panel-${data.device_id}`);
+      if (panel) {
+        panel.classList.add('new-text');
+        clearTimeout(speakingTimers[`flash-${data.device_id}`]);
+        speakingTimers[`flash-${data.device_id}`] = setTimeout(() => panel.classList.remove('new-text'), 2000);
+      }
     }
 
     markSpeaking(data.device_id);
@@ -1413,17 +1484,20 @@
   // ── Focus View Controls ────────────────────────────────────────────────
   function toggleView() {
     currentView = currentView === 'grid' ? 'focus' : 'grid';
-    const grid      = document.getElementById('grid');
-    const focusView = document.getElementById('focus-view');
-    const btn       = document.getElementById('view-toggle-btn');
+    const grid       = document.getElementById('grid');
+    const benchStrip = document.getElementById('bench-strip');
+    const focusView  = document.getElementById('focus-view');
+    const btn        = document.getElementById('view-toggle-btn');
 
     if (currentView === 'focus') {
       grid.style.display = 'none';
+      benchStrip.style.display = 'none';
       focusView.classList.add('active');
       btn.textContent = '⊟ Grid';
       btn.classList.add('focus-active');
     } else {
       grid.style.display = '';
+      benchStrip.style.display = '';   // let .visible class control it
       focusView.classList.remove('active');
       btn.textContent = '⊞ Focus';
       btn.classList.remove('focus-active');
@@ -1431,37 +1505,81 @@
     }
   }
 
-  function muteToSidebar(deviceId) {
+  // Bench a speaker — shared between Grid (bench strip) and Focus (sidebar)
+  function benchSpeaker(deviceId) {
     if (mutedSpeakers.has(deviceId)) return;
     mutedSpeakers.add(deviceId);
 
-    // Hide existing messages from this speaker in the feed
-    document.querySelectorAll(`.feed-msg[data-device-id="${deviceId}"]`).forEach(el => {
-      el.classList.add('feed-muted');
-    });
+    // Grid: hide panel and reflow
+    const panel = document.getElementById(`panel-${deviceId}`);
+    if (panel) panel.classList.add('benched');
+    updateGridLayout();
+    renderBenchStrip();
 
+    // Focus feed: dim messages
+    document.querySelectorAll(`.feed-msg[data-device-id="${deviceId}"]`).forEach(el => el.classList.add('feed-muted'));
     updateSidebarCount();
     renderSidebar();
+
     const name = document.getElementById(`name-${deviceId}`)?.textContent || `Speaker ${deviceId}`;
-    showToast(`${name} moved to bench`);
+    showToast(`${name} → bench`);
   }
 
-  function restoreFromSidebar(deviceId) {
+  function muteToSidebar(deviceId) { benchSpeaker(deviceId); }
+
+  function restoreFromBench(deviceId) {
     mutedSpeakers.delete(deviceId);
 
-    // Restore messages in feed
-    document.querySelectorAll(`.feed-msg[data-device-id="${deviceId}"]`).forEach(el => {
-      el.classList.remove('feed-muted');
-    });
+    // Grid: show panel and reflow
+    const panel = document.getElementById(`panel-${deviceId}`);
+    if (panel) panel.classList.remove('benched');
+    updateGridLayout();
+    renderBenchStrip();
 
+    // Focus feed: restore messages
+    document.querySelectorAll(`.feed-msg[data-device-id="${deviceId}"]`).forEach(el => el.classList.remove('feed-muted'));
     updateSidebarCount();
     renderSidebar();
+
     const name = document.getElementById(`name-${deviceId}`)?.textContent || `Speaker ${deviceId}`;
-    showToast(`${name} restored to feed`);
+    showToast(`${name} restored`);
     if (autoScroll) {
       const feed = document.getElementById('focus-feed');
       if (feed) feed.scrollTop = feed.scrollHeight;
     }
+  }
+
+  function restoreFromSidebar(deviceId) { restoreFromBench(deviceId); }
+
+  function renderBenchStrip() {
+    const strip = document.getElementById('bench-strip');
+    if (!strip) return;
+
+    strip.querySelectorAll('.bench-chip').forEach(el => el.remove());
+
+    if (mutedSpeakers.size === 0) {
+      strip.classList.remove('visible');
+      return;
+    }
+
+    strip.classList.add('visible');
+    mutedSpeakers.forEach(deviceId => {
+      const colorIdx = SPEAKER_INDEX[deviceId] ?? 0;
+      const color    = SPEAKER_COLORS[colorIdx];
+      const initial  = SPEAKER_INITIALS[deviceId] || '?';
+      const nameEl   = document.getElementById(`name-${deviceId}`);
+      const name     = nameEl ? nameEl.textContent.trim() : `Speaker ${deviceId}`;
+
+      const chip = document.createElement('div');
+      chip.className = 'bench-chip';
+      chip.id = `bench-chip-${deviceId}`;
+      chip.innerHTML = `
+        <div class="bench-chip-av" style="border-color:${color};background:color-mix(in srgb,${color} 12%,var(--surface));color:${color}">${initial}</div>
+        <span class="bench-chip-name" style="color:${color}">${escapeHTML(name)}</span>
+        <button class="bench-chip-restore" onclick="restoreFromBench(${deviceId})">↩</button>
+      `;
+      strip.appendChild(chip);
+    });
   }
 
   function renderSidebar() {
@@ -1610,9 +1728,41 @@
   }
 
   // ── Grid Layout ────────────────────────────────────────────────────────
+  // Cols × rows for each visible panel count (desktop).
+  // 3 panels → 3×1 so panels use full height (much more text visible).
+  // 7 and 5 get their own column count so benching any single panel resizes.
+  const GRID_LAYOUTS = [
+    [1,1], // 0
+    [1,1], // 1
+    [2,1], // 2
+    [3,1], // 3 — full height, 3 wide panels
+    [2,2], // 4
+    [3,2], // 5
+    [3,2], // 6
+    [4,2], // 7
+    [4,2], // 8
+  ];
+
   function updateGridLayout() {
-    document.getElementById('grid').dataset.count = speakerOrder.length || '0';
+    const visible = speakerOrder.filter(id => !mutedSpeakers.has(id)).length;
+    const grid    = document.getElementById('grid');
+    const mobile  = window.innerWidth < 768;
+
+    let cols, rows;
+    if (mobile) {
+      // Mobile: max 2 columns, auto rows
+      cols = visible <= 1 ? 1 : 2;
+      rows = Math.ceil(visible / cols);
+    } else {
+      [cols, rows] = GRID_LAYOUTS[Math.min(visible, 8)] ?? [4, 2];
+    }
+
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    grid.style.gridTemplateRows    = `repeat(${rows}, 1fr)`;
+    grid.dataset.count = visible;
   }
+
+  window.addEventListener('resize', updateGridLayout);
 
   function updateSpeakerBadge() {
     document.getElementById('speaker-badge').textContent =
