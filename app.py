@@ -11,7 +11,9 @@ Two parallel layers:
 import asyncio
 import json
 import logging
+import re
 import time
+from collections import deque
 from pathlib import Path
 from typing import Dict, List, Set
 
@@ -54,6 +56,11 @@ connected_clients: Set[WebSocket] = set()
 transcript_history: Dict[int, List[dict]] = {}
 active_speakers: Dict[int, dict] = {}
 
+# Live audio energy per device — updated every 30ms chunk, exponential decay
+# Half-life ≈ 3 s so energy stays relevant across brief pauses between phrases
+_live_rms: Dict[int, float] = {}
+LIVE_RMS_DECAY = 0.993   # per 30 ms chunk → 0.993^100 ≈ 0.50 after 3 s
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +81,113 @@ def extract_serial(pw_node_name: str, bus_path: str = "") -> str:
     return pw_node_name[-6:].upper()
 
 
+# ── Crosstalk / Bleed Suppressor ─────────────────────────────────────────────
+
+_PUNCT_RE = re.compile(r"[^\w\s]")
+
+class CrosstalkSuppressor:
+    """
+    Suppress transcripts that are mic bleed from a louder neighbour.
+    All operations are O(k) where k = recent segment count (~2-8 typical).
+    Uses set intersection — microsecond-level, never blocks the event loop.
+
+    Suppresses segment B only when ALL of these hold:
+      1. Timing: segment A from a different mic arrived within WINDOW_SECS.
+      2. Volume: A.rms >= B.rms * VOLUME_RATIO (A is significantly louder).
+      3. Content: >OVERLAP_THRESHOLD of B's meaningful words appear in A's text.
+    OR (short-bleed edge case):
+      1. B has <= SHORT_WORD_LIMIT words.
+      2. B.rms < NOISE_FLOOR (near-silent mic).
+      3. A.rms >= B.rms * SPIKE_RATIO (A had a massive spike).
+    Double-talk is preserved: if words don't overlap, no suppression.
+    """
+
+    WINDOW_SECS       = 12.0   # covers long gaps between exclusive-pool flushes
+    VOLUME_RATIO      = 1.5    # louder mic must be at least 1.5× louder
+    OVERLAP_THRESHOLD = 0.30   # >30 % of weaker mic's content words must match
+    SHORT_WORD_LIMIT  = 3      # segments with ≤3 words get the short-bleed check
+    NOISE_FLOOR       = 0.008  # RMS below this = near noise floor
+    SPIKE_RATIO       = 3.0    # "massive spike" multiplier for short-bleed case
+
+    def __init__(self):
+        # Each entry: (arrival_time, device_id, rms, content_word_set)
+        self._recent: deque = deque()
+
+    @staticmethod
+    def _content_words(text: str) -> frozenset:
+        """Strip punctuation, lowercase, keep only words longer than 3 chars."""
+        cleaned = _PUNCT_RE.sub("", text.lower())
+        return frozenset(w for w in cleaned.split() if len(w) > 3)
+
+    def _purge_old(self, now: float) -> None:
+        cutoff = now - self.WINDOW_SECS
+        while self._recent and self._recent[0][0] < cutoff:
+            self._recent.popleft()
+
+    def _is_bleed(self, rms_b: float, words_b: frozenset, wc_b: int,
+                  rms_a: float, words_a: frozenset) -> bool:
+        """Core bleed test: returns True if B looks like a bleed of A."""
+        if rms_a < rms_b * self.VOLUME_RATIO:
+            return False
+        if wc_b <= self.SHORT_WORD_LIMIT and rms_b < self.NOISE_FLOOR and rms_a >= rms_b * self.SPIKE_RATIO:
+            return True
+        if words_b and len(words_b & words_a) / len(words_b) > self.OVERLAP_THRESHOLD:
+            return True
+        return False
+
+    def check_against_history(self, segment, live_rms: dict = None) -> bool:
+        """
+        Check segment against recently committed segments.
+        Aggregates peak RMS and union of content words per device so that
+        fragmented transcriptions ("4R" + "en el micrófono" + "esta es una prueba")
+        are treated as one combined source rather than three separate weak signals.
+        live_rms: current audio energy per device — augments historical RMS so that
+        a device actively speaking but not yet committed still registers as dominant.
+        """
+        now = time.time()
+        self._purge_old(now)
+
+        rms_b   = segment.rms_volume
+        words_b = self._content_words(segment.text)
+        wc_b    = len(segment.text.split())
+
+        # Build per-device peak RMS and accumulated word union from the window
+        dev_rms:   Dict[int, float]     = {}
+        dev_words: Dict[int, frozenset] = {}
+        for _, dev_a, rms_a, words_a in self._recent:
+            if dev_a == segment.device_id:
+                continue
+            if rms_a > dev_rms.get(dev_a, 0.0):
+                dev_rms[dev_a] = rms_a
+            dev_words[dev_a] = dev_words.get(dev_a, frozenset()) | words_a
+
+        # Augment with live audio energy — catches devices that are loud right now
+        # but haven't committed a transcript recently (pauses, pool timing gaps)
+        if live_rms:
+            for dev_id, live in live_rms.items():
+                if dev_id != segment.device_id and live > dev_rms.get(dev_id, 0.0):
+                    dev_rms[dev_id] = live
+
+        for dev_id, rms_a in dev_rms.items():
+            words_a = dev_words.get(dev_id, frozenset())
+            if self._is_bleed(rms_b, words_b, wc_b, rms_a, words_a):
+                return True
+        return False
+
+    def record(self, segment) -> None:
+        """Commit a segment to the recent history."""
+        words = self._content_words(segment.text)
+        self._recent.append((time.time(), segment.device_id, segment.rms_volume, words))
+
+
+crosstalk = CrosstalkSuppressor()
+
+# Hold transcripts for this long before deciding — lets simultaneous Whisper
+# results (which finish within ~130ms of each other) all arrive before we compare.
+CROSSTALK_HOLD_SECS = 0.80
+_pending_segments: list = []   # [(arrival_float, TranscriptSegment)]
+
+
 # ── WebSocket broadcast ───────────────────────────────────────────────────────
 
 async def broadcast(message: dict) -> None:
@@ -90,26 +204,103 @@ async def broadcast(message: dict) -> None:
 # ── Transcript callback ───────────────────────────────────────────────────────
 
 async def on_transcript_received(segment: TranscriptSegment) -> None:
-    entry = {
-        "device_id": segment.device_id,
-        "speaker_name": segment.speaker_name,
-        "text": segment.text,
-        "language": segment.language,
-        "confidence": round(segment.confidence, 3),
-        "timestamp": segment.timestamp,
-    }
-    history = transcript_history.setdefault(segment.device_id, [])
-    history.append(entry)
-    if len(history) > MAX_TRANSCRIPT_HISTORY:
-        history.pop(0)
-    await broadcast({"type": "transcript", "data": entry})
-    logger.info(f"[{segment.speaker_name}] ({segment.language}): {segment.text[:80]}")
+    """Queue segment for batch crosstalk evaluation."""
+    _pending_segments.append((time.time(), segment))
+
+
+async def _flush_pending_loop() -> None:
+    """
+    Process pending segments every 80ms.
+    Holding CROSSTALK_HOLD_SECS lets all parallel Whisper results (which finish
+    within ~150ms of each other) arrive before we compare them against each other.
+
+    Two-phase suppression:
+      Phase 1 — within-batch: compare every segment against every other segment
+                 that arrived in the same flush window. Handles the common case
+                 where 4-8 mics all transcribe the same utterance simultaneously.
+      Phase 2 — historical: check survivors against segments committed in the
+                 last WINDOW_SECS. Catches staggered bleed where mics happen to
+                 flush at different times.
+    """
+    while True:
+        await asyncio.sleep(0.08)
+        now    = time.time()
+        cutoff = now - CROSSTALK_HOLD_SECS
+
+        ready, still_pending = [], []
+        for item in _pending_segments:
+            (ready if item[0] <= cutoff else still_pending).append(item)
+        _pending_segments.clear()
+        _pending_segments.extend(still_pending)
+        if not ready:
+            continue
+
+        # ── Phase 1: within-batch ─────────────────────────────────────────
+        batch_suppressed: set = set()
+        # Pre-compute content words once per segment
+        meta = [
+            (seg, seg.rms_volume,
+             CrosstalkSuppressor._content_words(seg.text),
+             len(seg.text.split()))
+            for _, seg in ready
+        ]
+        # Aggregate per device across the batch (handles multiple fragments from same mic)
+        batch_dev_rms:   Dict[int, float]     = {}
+        batch_dev_words: Dict[int, frozenset] = {}
+        for seg, rms, words, _ in meta:
+            dev = seg.device_id
+            if rms > batch_dev_rms.get(dev, 0.0):
+                batch_dev_rms[dev] = rms
+            batch_dev_words[dev] = batch_dev_words.get(dev, frozenset()) | words
+
+        for i, (seg_b, rms_b, words_b, wc_b) in enumerate(meta):
+            if i in batch_suppressed:
+                continue
+            for dev_a, rms_a in batch_dev_rms.items():
+                if dev_a == seg_b.device_id:
+                    continue
+                words_a = batch_dev_words[dev_a]
+                if crosstalk._is_bleed(rms_b, words_b, wc_b, rms_a, words_a):
+                    batch_suppressed.add(i)
+                    break
+
+        # ── Phase 2: historical + broadcast ──────────────────────────────
+        for i, (seg, rms_b, words_b, wc_b) in enumerate(meta):
+            if i in batch_suppressed:
+                logger.info(
+                    f"[CROSSTALK-BATCH] suppressed {seg.speaker_name} "
+                    f"rms={rms_b:.4f}: {seg.text[:60]}"
+                )
+                continue
+            if crosstalk.check_against_history(seg, _live_rms):
+                logger.info(
+                    f"[CROSSTALK-HIST] suppressed {seg.speaker_name} "
+                    f"rms={rms_b:.4f}: {seg.text[:60]}"
+                )
+                continue
+            crosstalk.record(seg)
+            entry = {
+                "device_id":    seg.device_id,
+                "speaker_name": seg.speaker_name,
+                "text":         seg.text,
+                "language":     seg.language,
+                "confidence":   round(seg.confidence, 3),
+                "timestamp":    seg.timestamp,
+            }
+            history = transcript_history.setdefault(seg.device_id, [])
+            history.append(entry)
+            if len(history) > MAX_TRANSCRIPT_HISTORY:
+                history.pop(0)
+            await broadcast({"type": "transcript", "data": entry})
+            logger.info(f"[{seg.speaker_name}] ({seg.language}): {seg.text[:80]}")
 
 
 # ── Audio callback — feeds BOTH layers ───────────────────────────────────────
 
 async def on_audio_chunk(device_id: int, pcm: np.ndarray) -> None:
     buffer_mgr.add_chunk(device_id, pcm)
+    chunk_rms = float(np.sqrt(np.mean(pcm ** 2)))
+    _live_rms[device_id] = max(chunk_rms, _live_rms.get(device_id, 0.0) * LIVE_RMS_DECAY)
 
 
 def _apply_gain(device, gain_pct: int):
@@ -192,6 +383,7 @@ async def startup():
     
     asyncio.create_task(hotplug_scanner())
     asyncio.create_task(pipewire_watchdog())
+    asyncio.create_task(_flush_pending_loop(), name="crosstalk_flush")
 
 
 @app.on_event("shutdown")

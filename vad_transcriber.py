@@ -84,6 +84,7 @@ class TranscriptSegment:
     confidence:   float
     timestamp:    float = field(default_factory=time.time)
     is_partial:   bool  = False
+    rms_volume:   float = 0.0
 
 
 class WhisperTranscriber:
@@ -531,8 +532,9 @@ class VADTranscriptionPipeline:
                 break  # one transcription per tick
 
     async def _transcribe_and_emit(self, audio, n_samples, device_id, speaker_name, buf, pool_idx):
-        whisper  = self._pools[pool_idx]
-        logger.info(f"dev={device_id} → Whisper pool={pool_idx} audio={n_samples/SAMPLE_RATE:.2f}s")
+        whisper    = self._pools[pool_idx]
+        rms_volume = float(np.sqrt(np.mean(audio[:n_samples] ** 2)))
+        logger.info(f"dev={device_id} → Whisper pool={pool_idx} audio={n_samples/SAMPLE_RATE:.2f}s rms={rms_volume:.4f}")
         segment  = await whisper.transcribe(audio)
         buf.mark_transcribed(n_samples)
         self._last_tx_time[device_id] = time.time()
@@ -564,6 +566,7 @@ class VADTranscriptionPipeline:
         if segment and segment.text.strip():
             segment.device_id    = device_id
             segment.speaker_name = speaker_name
+            segment.rms_volume   = rms_volume
             if self.on_transcript:
                 try:
                     await self.on_transcript(segment)
