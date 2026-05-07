@@ -62,23 +62,47 @@ _live_rms: Dict[int, float] = {}
 LIVE_RMS_DECAY = 0.993   # per 30 ms chunk → 0.993^100 ≈ 0.50 after 3 s
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Channel naming (sequential, persistent) ───────────────────────────────────
 
-def extract_serial(pw_node_name: str, bus_path: str = "") -> str:
-    import re
-    # Use USB port path when available — stable and unique even when USB serial is identical
+PORT_MAP_FILE = Path(__file__).parent / "port_map.json"
+_port_map: Dict[str, int] = {}
+
+def _load_port_map() -> None:
+    global _port_map
+    try:
+        if PORT_MAP_FILE.exists():
+            _port_map = json.loads(PORT_MAP_FILE.read_text())
+    except Exception:
+        _port_map = {}
+
+def _save_port_map() -> None:
+    try:
+        PORT_MAP_FILE.write_text(json.dumps(_port_map, indent=2))
+    except Exception as e:
+        logger.warning(f"Could not save port_map: {e}")
+
+def _channel_number(bus_path: str) -> int:
+    """Stable sequential number (1-based) for a USB bus-path, persisted across reboots."""
+    if bus_path in _port_map:
+        return _port_map[bus_path]
+    num = max(_port_map.values(), default=0) + 1
+    _port_map[bus_path] = num
+    _save_port_map()
+    logger.info(f"Assigned channel {num} to {bus_path!r}")
+    return num
+
+def _channel_label(bus_path: str, pw_node_name: str = "", suffix: str = "") -> str:
+    """Short label: '1L', '2R', '3', etc. Falls back to node tail if no bus_path."""
     if bus_path:
-        m = re.search(r'usb-\d+:(\d+(?:\.\d+)*)', bus_path)
-        if m:
-            port = m.group(1).replace(".", "_")
-            return f"PORT{port}"
-    m = re.search(r'USB_Composite_Device_([A-F0-9]+)-', pw_node_name, re.IGNORECASE)
-    if m:
-        return m.group(1)[-4:].upper()
-    m = re.search(r'Wireless_Mic_Rx_([A-Z0-9]+)-', pw_node_name, re.IGNORECASE)
-    if m:
-        return m.group(1)[-6:].upper()
-    return pw_node_name[-6:].upper()
+        return str(_channel_number(bus_path)) + suffix
+    return pw_node_name[-4:].upper() + suffix
+
+def _sorted_speakers() -> List[dict]:
+    """Active speakers sorted by channel label for consistent grid ordering."""
+    def _key(sp):
+        m = re.match(r'^(\d+)(.*)', sp.get("serial", sp.get("name", "")))
+        return (int(m.group(1)), m.group(2)) if m else (999, "")
+    return sorted(active_speakers.values(), key=_key)
 
 
 # ── Crosstalk / Bleed Suppressor ─────────────────────────────────────────────
@@ -334,21 +358,21 @@ async def startup():
     pipeline.on_device_inactive = on_device_inactive
     pipeline.on_device_active   = on_device_active
 
+    _load_port_map()
     logger.info("Discovering audio devices …")
     devices = await audio_manager.discover_bluetooth_devices()
     usb_devices = sorted(
         [d for d in devices if "alsa_input.usb" in d.pw_node_name.lower()],
-        key=lambda d: d.id
+        key=lambda d: d.bus_path or d.pw_node_name,
     )
     for device in usb_devices:
-        serial = extract_serial(device.pw_node_name, device.bus_path)
         if device.is_stereo:
             for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
-                name = serial + suffix
+                name = _channel_label(device.bus_path, device.pw_node_name, suffix)
                 active_speakers[dev_id] = {
                     "device_id": dev_id,
                     "name": name,
-                    "serial": serial + suffix,
+                    "serial": name,
                     "pw_node_name": device.pw_node_name,
                     "mac": device.mac_address,
                     "gain_pct": DEFAULT_GAIN_PCT,
@@ -357,15 +381,15 @@ async def startup():
                 }
                 pipeline.register_speaker(dev_id, name)
                 pipeline.set_noise_gate(dev_id, DEFAULT_NOISE_GATE)
-                buffer_mgr.register_device(dev_id, serial + suffix)
+                buffer_mgr.register_device(dev_id, name)
             await audio_manager.start_capture(device, callback=on_audio_chunk)
             _apply_gain(device, DEFAULT_GAIN_PCT)
         else:
-            name = serial
+            name = _channel_label(device.bus_path, device.pw_node_name)
             active_speakers[device.id] = {
                 "device_id": device.id,
                 "name": name,
-                "serial": serial,
+                "serial": name,
                 "pw_node_name": device.pw_node_name,
                 "mac": device.mac_address,
                 "gain_pct": DEFAULT_GAIN_PCT,
@@ -374,7 +398,7 @@ async def startup():
             }
             pipeline.register_speaker(device.id, name)
             pipeline.set_noise_gate(device.id, DEFAULT_NOISE_GATE)
-            buffer_mgr.register_device(device.id, serial)
+            buffer_mgr.register_device(device.id, name)
             await audio_manager.start_capture(device, callback=on_audio_chunk)
             _apply_gain(device, DEFAULT_GAIN_PCT)
 
@@ -467,33 +491,32 @@ async def hotplug_scanner():
             )
             for device in usb_devices:
                 if device.id not in active_speakers and not device.active:
-                    serial = extract_serial(device.pw_node_name, device.bus_path)
                     if device.is_stereo:
                         for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
-                            name = serial + suffix
+                            name = _channel_label(device.bus_path, device.pw_node_name, suffix)
                             active_speakers[dev_id] = {
                                 "device_id": dev_id,
                                 "name": name,
-                                "serial": serial + suffix,
+                                "serial": name,
                                 "pw_node_name": device.pw_node_name,
                                 "mac": device.mac_address,
                             }
                             pipeline.register_speaker(dev_id, name)
-                            buffer_mgr.register_device(dev_id, serial + suffix)
+                            buffer_mgr.register_device(dev_id, name)
                             await broadcast({"type": "speaker_added", "data": active_speakers[dev_id]})
                         await audio_manager.start_capture(device, callback=on_audio_chunk)
-                        logger.info(f"Hotplug: registered DJI stereo (id={device.id})")
+                        logger.info(f"Hotplug: registered stereo (id={device.id})")
                     else:
-                        name = serial
+                        name = _channel_label(device.bus_path, device.pw_node_name)
                         active_speakers[device.id] = {
                             "device_id": device.id,
                             "name": name,
-                            "serial": serial,
+                            "serial": name,
                             "pw_node_name": device.pw_node_name,
                             "mac": device.mac_address,
                         }
                         pipeline.register_speaker(device.id, name)
-                        buffer_mgr.register_device(device.id, serial)
+                        buffer_mgr.register_device(device.id, name)
                         await audio_manager.start_capture(device, callback=on_audio_chunk)
                         await broadcast({"type": "speaker_added", "data": active_speakers[device.id]})
                         logger.info(f"Hotplug: registered {name} (id={device.id})")
@@ -519,7 +542,7 @@ async def serve_manual():
 
 @app.get("/api/speakers")
 async def get_speakers():
-    return {"speakers": list(active_speakers.values()), "count": len(active_speakers)}
+    return {"speakers": _sorted_speakers(), "count": len(active_speakers)}
 
 @app.get("/api/history/{device_id}")
 async def get_history(device_id: int):
@@ -565,13 +588,13 @@ async def add_speaker(req: AddSpeakerRequest):
         return {"success": False, "error": "Device not found"}
     if device.active:
         return {"success": False, "error": "Device already active"}
-    serial = extract_serial(device.pw_node_name, device.bus_path)
+    label = _channel_label(device.bus_path, device.pw_node_name)
     active_speakers[device.id] = {
-        "device_id": device.id, "name": req.name, "serial": serial,
+        "device_id": device.id, "name": req.name, "serial": label,
         "pw_node_name": device.pw_node_name, "mac": device.mac_address,
     }
     pipeline.register_speaker(device.id, req.name)
-    buffer_mgr.register_device(device.id, serial)
+    buffer_mgr.register_device(device.id, label)
     await audio_manager.start_capture(device, callback=on_audio_chunk)
     await broadcast({"type": "speaker_added", "data": active_speakers[device.id]})
     return {"success": True}
@@ -693,7 +716,7 @@ async def websocket_endpoint(ws: WebSocket):
 
     await ws.send_text(json.dumps({
         "type": "init",
-        "data": {"speakers": list(active_speakers.values()), "history": transcript_history},
+        "data": {"speakers": _sorted_speakers(), "history": transcript_history},
     }))
 
     try:

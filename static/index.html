@@ -1280,10 +1280,39 @@
   }
 
   // ── Speakers ───────────────────────────────────────────────────────────
+
+  function _channelSortKey(serial) {
+    // "1L" → [1, "L"], "10R" → [10, "R"], "2" → [2, ""]
+    const m = (serial || '').match(/^(\d+)(.*)/);
+    return m ? [parseInt(m[1]), m[2]] : [999, serial || ''];
+  }
+
+  function _reorderGrid() {
+    // Sort speakerOrder by channel label, update colour indices, reorder DOM nodes
+    speakerOrder.sort((a, b) => {
+      const ka = _channelSortKey(DEVICE_SERIALS[a]);
+      const kb = _channelSortKey(DEVICE_SERIALS[b]);
+      return ka[0] !== kb[0] ? ka[0] - kb[0] : ka[1].localeCompare(kb[1]);
+    });
+    const grid = document.getElementById('grid');
+    speakerOrder.forEach((id, i) => {
+      SPEAKER_INDEX[id] = i % 4;
+      const panel = document.getElementById(`panel-${id}`);
+      if (panel) grid.appendChild(panel);   // moves to correct position
+    });
+  }
+
   function initSpeakers(speakers, history) {
     const grid = document.getElementById('grid');
     grid.innerHTML = '';
     speakerOrder = [];
+
+    // Server already sends sorted, but sort client-side too as a safety net
+    speakers.sort((a, b) => {
+      const ka = _channelSortKey(a.serial || a.name);
+      const kb = _channelSortKey(b.serial || b.name);
+      return ka[0] !== kb[0] ? ka[0] - kb[0] : ka[1].localeCompare(kb[1]);
+    });
 
     speakers.forEach((sp, i) => {
       SPEAKER_INDEX[sp.device_id] = i % 4;
@@ -1309,12 +1338,11 @@
 
   function addSpeakerPanel(sp) {
     if (speakerOrder.includes(sp.device_id)) return;
-    const idx = speakerOrder.length % 4;
-    SPEAKER_INDEX[sp.device_id] = idx;
     SPEAKER_INITIALS[sp.device_id] = (sp.name || 'S')[0].toUpperCase();
     DEVICE_SERIALS[sp.device_id] = sp.serial || String(sp.device_id);
     speakerOrder.push(sp.device_id);
     document.getElementById('grid').appendChild(buildPanel(sp));
+    _reorderGrid();
     updateGridLayout();
     updateSpeakerBadge();
   }
