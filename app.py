@@ -42,8 +42,8 @@ WHISPER_MODEL = "large-v3"
 CUDA_DEVICE   = "cuda"
 COMPUTE_TYPE  = "int8"
 MAX_TRANSCRIPT_HISTORY = 50
-DEFAULT_GAIN_PCT   = 90
-DEFAULT_NOISE_GATE = 0.020
+DEFAULT_GAIN_PCT   = 100   # AGC off: full passthrough, no hardware compression to compensate for
+DEFAULT_NOISE_GATE = 0.010  # AGC off: real noise floor ~0.003–0.005; 0.010 catches soft speech
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Multi-Speaker Transcription API", version="1.0.0")
@@ -143,28 +143,35 @@ class CrosstalkSuppressor:
 
     Suppresses segment B when source A is louder AND:
       - Word overlap >30% (normal case), OR
-      - Source known only via live_rms and is 2× louder (no words committed yet), OR
+      - Source known only via live_rms and is 3× louder (no words committed yet), OR
       - Short/near-silent bleed with massive spike (edge case).
     Double-talk is preserved: different words from similar-volume mics are kept.
+    Tuned for DJI Mic Mini with AGC/Clipping Control disabled (linear audio).
     """
 
-    WINDOW_SECS       = 12.0   # history window for committed segments
-    VOLUME_RATIO      = 1.1    # DJI AGC compresses levels — 1.1× is sufficient
-    OVERLAP_THRESHOLD = 0.30   # >30 % of weaker mic's content words must match
-    LIVE_ONLY_RATIO   = 2.0    # threshold when source has no committed words yet
-    SHORT_WORD_LIMIT  = 3      # segments with ≤3 words get the short-bleed check
-    NOISE_FLOOR       = 0.008  # RMS below this = near noise floor
-    SPIKE_RATIO       = 3.0    # "massive spike" multiplier for short-bleed case
+    WINDOW_SECS          = 12.0  # history window for committed segments
+    VOLUME_RATIO         = 2.0   # room acoustics give 2–10× gap; 2× catches borderline bleed
+    SAME_RECEIVER_RATIO  = 1.1   # DJI L/R channels on same receiver: hardware cross-talk ratio ~1.1–1.2×
+    OVERLAP_THRESHOLD    = 0.20  # >20 % of weaker mic's content words must match
+    LIVE_ONLY_RATIO      = 3.0   # live-only (no committed words yet) — kept strict
+    SHORT_WORD_LIMIT     = 3     # segments with ≤3 words get the short-bleed check
+    NOISE_FLOOR          = 0.005 # no AGC means hardware noise floor is stable and quieter
+    SPIKE_RATIO          = 5.0   # linear audio → source/bleed ratio at near-silence is larger
 
     def __init__(self):
         # Each entry: (arrival_time, device_id, rms, content_word_set)
         self._recent: deque = deque()
 
     @staticmethod
+    def _same_receiver(dev_a: int, dev_b: int) -> bool:
+        """True when two device IDs share the same physical DJI receiver (differ by 10000)."""
+        return abs(dev_a - dev_b) == 10000
+
+    @staticmethod
     def _content_words(text: str) -> frozenset:
-        """Strip punctuation, lowercase, keep only words longer than 3 chars."""
+        """Strip punctuation, lowercase, keep words longer than 3 chars OR pure digits."""
         cleaned = _PUNCT_RE.sub("", text.lower())
-        return frozenset(w for w in cleaned.split() if len(w) > 3)
+        return frozenset(w for w in cleaned.split() if len(w) > 3 or w.isdigit())
 
     def _purge_old(self, now: float) -> None:
         cutoff = now - self.WINDOW_SECS
@@ -172,9 +179,11 @@ class CrosstalkSuppressor:
             self._recent.popleft()
 
     def _is_bleed(self, rms_b: float, words_b: frozenset, wc_b: int,
-                  rms_a: float, words_a: frozenset) -> bool:
+                  rms_a: float, words_a: frozenset, volume_ratio: float = None) -> bool:
         """Core bleed test: returns True if B looks like a bleed of A."""
-        if rms_a < rms_b * self.VOLUME_RATIO:
+        if volume_ratio is None:
+            volume_ratio = self.VOLUME_RATIO
+        if rms_a < rms_b * volume_ratio:
             return False
         if wc_b <= self.SHORT_WORD_LIMIT and rms_b < self.NOISE_FLOOR and rms_a >= rms_b * self.SPIKE_RATIO:
             return True
@@ -195,15 +204,21 @@ class CrosstalkSuppressor:
         LIVE_ONLY_RATIO (2×) is used instead of requiring word overlap. This handles
         the race where the source mic's Whisper call finishes after the bleed mic's
         hold period expires.
+
+        Queue-time snapshot: if dominant_peer_rms < rms_volume, this segment was the
+        loudest device at the moment it was queued — it is the source, not bleed.
+        Skip historical comparison entirely to avoid suppressing consecutive speakers.
         """
         now = time.time()
         self._purge_old(now)
 
-        rms_b   = segment.rms_volume
-        words_b = self._content_words(segment.text)
-        wc_b    = len(segment.text.split())
+        rms_b     = segment.rms_volume
+        words_b   = self._content_words(segment.text)
+        wc_b      = len(segment.text.split())
+        peer_snap = getattr(segment, "dominant_peer_rms", 0.0)
 
-        # Build per-device peak RMS and accumulated word union from the window
+        # Build per-device peak RMS and accumulated word union from the window.
+        # Done before the peer_snap check so dev_words is available for both.
         dev_rms:   Dict[int, float]     = {}
         dev_words: Dict[int, frozenset] = {}
         for _, dev_a, rms_a, words_a in self._recent:
@@ -220,29 +235,50 @@ class CrosstalkSuppressor:
                 if dev_id != segment.device_id and live > dev_rms.get(dev_id, 0.0):
                     dev_rms[dev_id] = live
 
+        # Peer-snap exemption: if this segment was the dominant device at queue
+        # time, it is likely the true source — but verify its words are unique.
+        # Late-arriving bleed can appear dominant once the source's live_rms has
+        # decayed; in that case the words will match the source's history entries.
+        if peer_snap < rms_b:
+            if words_b:
+                for words_a in dev_words.values():
+                    if words_a and len(words_b & words_a) / len(words_b) > self.OVERLAP_THRESHOLD:
+                        break  # Words match history → likely late bleed → full check
+                else:
+                    return False  # Words are unique → genuine new speaker → exempt
+            else:
+                return False  # No content words → exempt
+
         for dev_id, rms_a in dev_rms.items():
+            ratio   = self.SAME_RECEIVER_RATIO if self._same_receiver(dev_id, segment.device_id) else self.VOLUME_RATIO
             words_a = dev_words.get(dev_id, frozenset())
             if words_a:
-                # Source has committed words — use normal volume + overlap check
-                if self._is_bleed(rms_b, words_b, wc_b, rms_a, words_a):
+                # Source has committed words — use volume + overlap check
+                if self._is_bleed(rms_b, words_b, wc_b, rms_a, words_a, ratio):
                     return True
             elif rms_a >= rms_b * self.LIVE_ONLY_RATIO:
                 # Source only known via live_rms (no committed words yet).
-                # A 2× RMS gap strongly indicates an active dominant speaker.
-                return True
-
-        # Queue-time snapshot: source was already dominant when this audio was captured.
-        # live_rms has decayed since then (Whisper takes 1-4s); use the frozen snapshot.
-        peer_snap = getattr(segment, "dominant_peer_rms", 0.0)
-        if peer_snap >= rms_b * self.LIVE_ONLY_RATIO:
-            max_peer_now = max(dev_rms.values(), default=0.0)
-            if peer_snap > max_peer_now:
+                # A 3× RMS gap strongly indicates an active dominant speaker.
                 return True
 
         return False
 
     def record(self, segment) -> None:
         """Commit a segment to the recent history."""
+        peer_snap = getattr(segment, "dominant_peer_rms", 0.0)
+        rms_b     = segment.rms_volume
+        # Skip transition chunks: when a high-rms segment has a significant peer active
+        # at queue time, it likely captured the peer's speech as bleed in its tail.
+        # Committing it would write the peer's words under the wrong device, causing the
+        # peer's own next chunk to be falsely suppressed by HIST.
+        HIGH_RMS   = 0.05
+        PEER_RATIO = 0.35
+        if rms_b > HIGH_RMS and peer_snap > rms_b * PEER_RATIO and peer_snap > self.NOISE_FLOOR:
+            logger.info(
+                f"[HIST-SKIP] {segment.speaker_name} transition chunk skipped "
+                f"(rms={rms_b:.4f}, peer={peer_snap:.4f}, ratio={peer_snap/rms_b:.2f})"
+            )
+            return
         words = self._content_words(segment.text)
         self._recent.append((time.time(), segment.device_id, segment.rms_volume, words))
 
@@ -326,8 +362,9 @@ async def _flush_pending_loop() -> None:
             for dev_a, rms_a in batch_dev_rms.items():
                 if dev_a == seg_b.device_id:
                     continue
+                ratio   = crosstalk.SAME_RECEIVER_RATIO if crosstalk._same_receiver(dev_a, seg_b.device_id) else crosstalk.VOLUME_RATIO
                 words_a = batch_dev_words[dev_a]
-                if crosstalk._is_bleed(rms_b, words_b, wc_b, rms_a, words_a):
+                if crosstalk._is_bleed(rms_b, words_b, wc_b, rms_a, words_a, ratio):
                     batch_suppressed.add(i)
                     break
 
@@ -359,7 +396,7 @@ async def _flush_pending_loop() -> None:
             if len(history) > MAX_TRANSCRIPT_HISTORY:
                 history.pop(0)
             await broadcast({"type": "transcript", "data": entry})
-            logger.info(f"[{seg.speaker_name}] ({seg.language}): {seg.text[:80]}")
+            logger.info(f"[{seg.speaker_name}] rms={rms_b:.4f} ({seg.language}): {seg.text[:80]}")
 
 
 # ── Audio callback — feeds BOTH layers ───────────────────────────────────────

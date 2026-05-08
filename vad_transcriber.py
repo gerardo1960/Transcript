@@ -20,13 +20,13 @@ from audio_recorder import AudioBufferManager
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE              = 16000
-FLUSH_INTERVAL           = 0.5
-MIN_AUDIO_SECS           = 2.0   # minimum audio before considering transcription
+FLUSH_INTERVAL           = 0.3
+MIN_AUDIO_SECS           = 1.5   # minimum audio before considering transcription
 PRE_ROLL_SECS            = 0.8
 MIN_ENERGY               = 0.002
-SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~3s)
+SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~1.8s)
 TAIL_SILENCE_SECS        = 0.5  # tail silence in pending audio → phrase boundary
-MAX_WAIT_SECS            = 3.0  # force transcription if no phrase boundary for this long
+MAX_WAIT_SECS            = 2.0  # force transcription if no phrase boundary for this long
 WHISPER_TIMEOUT_SECS     = 25   # kill a hung Whisper call after this many seconds
 LIVE_RMS_DECAY           = 0.993 # per 30 ms chunk → half-life ~3 s
 
@@ -62,10 +62,20 @@ def _looks_like_hallucination(text: str) -> bool:
     if top_count >= 3 and top_word not in _STOPWORDS and top_count / len(tokens) > 0.40:
         return True
 
-    # ── Pattern 3: mostly numbers ("1, 2, 3, 4, 5...") ──
-    number_tokens = sum(1 for t in tokens if re.fullmatch(r"\d+", t))
-    if len(tokens) >= 6 and number_tokens / len(tokens) > 0.50:
-        return True
+    # ── Pattern 3: clause-level repetition (same clause 2+ times after commas/semicolons) ──
+    clauses = [re.sub(r"[.,!?;:\-¿¡]", "", c).strip().lower()
+               for c in re.split(r"[,;]", text) if c.strip()]
+    if len(clauses) >= 3:
+        top_clause, top_n = Counter(clauses).most_common(1)[0]
+        if top_n >= 2 and len(top_clause.split()) >= 3:
+            return True
+
+    # ── Pattern 4: 3-gram repetition across the full text ──
+    if len(tokens) >= 9:
+        trigrams = [" ".join(tokens[i:i+3]) for i in range(len(tokens) - 2)]
+        top_tri, top_tri_n = Counter(trigrams).most_common(1)[0]
+        if top_tri_n >= 3:
+            return True
 
     return False
 
@@ -407,15 +417,16 @@ class VADTranscriptionPipeline:
                 force = (time.time() - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
                 if not at_boundary and not force:
                     continue
+                n_samples = len(audio)
                 dominant_peer_rms = max(
                     (v for k, v in self._live_rms.items() if k != device_id),
                     default=0.0,
                 )
+                buf.mark_transcribed(n_samples)   # advance cursor NOW so same audio is never re-queued
                 self._queued_devices.add(device_id)
                 await self._work_queue.put((
-                    device_id, audio, len(audio),
+                    device_id, audio, n_samples,
                     self._speaker_names.get(device_id, f"Speaker {device_id}"),
-                    buf,
                     dominant_peer_rms,
                 ))
 
@@ -423,24 +434,24 @@ class VADTranscriptionPipeline:
         """Pull work items from the queue and transcribe them."""
         whisper = self._workers[worker_idx]
         while True:
-            device_id, audio, n_samples, speaker_name, buf, dominant_peer_rms = \
+            device_id, audio, n_samples, speaker_name, dominant_peer_rms = \
                 await self._work_queue.get()
+            self._queued_devices.discard(device_id)
             try:
                 await self._transcribe_and_emit(
-                    audio, n_samples, device_id, speaker_name, buf, worker_idx,
+                    audio, n_samples, device_id, speaker_name, worker_idx,
                     dominant_peer_rms,
                 )
             finally:
                 self._work_queue.task_done()
 
-    async def _transcribe_and_emit(self, audio, n_samples, device_id, speaker_name, buf, worker_idx,
+    async def _transcribe_and_emit(self, audio, n_samples, device_id, speaker_name, worker_idx,
                                     dominant_peer_rms: float = 0.0):
         whisper    = self._workers[worker_idx]
         rms_volume = float(np.sqrt(np.mean(audio[:n_samples] ** 2)))
         logger.info(f"dev={device_id} → Whisper worker={worker_idx} audio={n_samples/SAMPLE_RATE:.2f}s rms={rms_volume:.4f} peer_rms={dominant_peer_rms:.4f}")
         segment  = await whisper.transcribe(audio)
-        buf.mark_transcribed(n_samples)
-        self._queued_devices.discard(device_id)   # release AFTER mark_transcribed — prevents re-queue during Whisper
+        # mark_transcribed was already called at queue time in _buffer_scan_loop
         self._last_tx_time[device_id] = time.time()
 
         # Language momentum (informational only — never force)
@@ -467,6 +478,12 @@ class VADTranscriptionPipeline:
         prob  = whisper.last_detected_language_probability
         text  = segment.text if segment else None
         logger.info(f"dev={device_id} lang={lang}({prob:.2f}) → {repr(text)}")
+        # Reject if the device is language-locked and Whisper detected a different language
+        # with at least 50% confidence — catches hallucinations like "Thank you for watching."
+        if segment and segment.text.strip() and current_lang is not None:
+            if lang != current_lang and prob >= 0.50:
+                logger.info(f"dev={device_id}: rejected '{text[:50]}' (lang={lang} p={prob:.2f}, locked={current_lang})")
+                return
         if segment and segment.text.strip():
             segment.device_id         = device_id
             segment.speaker_name      = speaker_name
