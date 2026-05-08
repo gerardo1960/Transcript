@@ -1212,6 +1212,91 @@
   let reconnectTimer = null;
   let speakingTimers = {};        // device_id → timeout handle
 
+  // ── Centralized UI config ─────────────────────────────────────────────
+  let _uiConfig = { saved_names: [], profiles: [], bench: [], gains: {}, gates: {} };
+  let _syncingConfig = false;   // suppress re-saves while applying a remote update
+
+  async function patchUiConfig(delta) {
+    // Update local state immediately for responsiveness, then persist to server.
+    // The server will broadcast ui_config_updated to all other connected clients.
+    if (delta.saved_names !== undefined) _uiConfig.saved_names = delta.saved_names;
+    if (delta.profiles    !== undefined) _uiConfig.profiles    = delta.profiles;
+    if (delta.bench       !== undefined) _uiConfig.bench       = delta.bench;
+    if (delta.gains       !== undefined) Object.assign(_uiConfig.gains, delta.gains);
+    if (delta.gates       !== undefined) Object.assign(_uiConfig.gates, delta.gates);
+    try {
+      await fetch('/api/ui_config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(delta),
+      });
+    } catch (e) { console.error('patchUiConfig failed', e); }
+  }
+
+  function applyUiConfig(config) {
+    _uiConfig = { saved_names: [], profiles: [], bench: [], gains: {}, gates: {}, ...config };
+
+    // Rebuild serial → device_id map
+    const s2d = {};
+    Object.entries(DEVICE_SERIALS).forEach(([id, serial]) => { s2d[serial] = parseInt(id); });
+
+    // Sync bench state without triggering a re-save
+    _syncingConfig = true;
+    try {
+      const targetBench = new Set(_uiConfig.bench || []);
+      targetBench.forEach(serial => {
+        const devId = s2d[serial];
+        if (devId !== undefined && !mutedSpeakers.has(devId)) benchSpeaker(devId);
+      });
+      [...mutedSpeakers].forEach(devId => {
+        const serial = DEVICE_SERIALS[devId];
+        if (serial && !targetBench.has(serial)) restoreFromBench(devId);
+      });
+    } finally { _syncingConfig = false; }
+
+    // Update gain/gate sliders (server already applied the hardware values)
+    Object.entries(_uiConfig.gains || {}).forEach(([serial, gain]) => {
+      const devId = s2d[serial];
+      const sl = devId !== undefined ? document.getElementById(`gain-${devId}`) : null;
+      if (sl) sl.value = gain;
+    });
+    Object.entries(_uiConfig.gates || {}).forEach(([serial, gate]) => {
+      const devId = s2d[serial];
+      const sl = devId !== undefined ? document.getElementById(`gate-${devId}`) : null;
+      if (sl) sl.value = Math.round(gate * 1000);
+    });
+
+    // Re-render profiles list
+    renderProfiles();
+  }
+
+  async function migrateLocalStorage() {
+    // One-time: move any pre-existing localStorage data to server config.
+    const localNames    = localStorage.getItem('transcript_saved_names');
+    const localProfiles = localStorage.getItem('tx_profiles');
+    if (!localNames && !localProfiles) return;
+    const patch = {};
+    if (localNames) {
+      try {
+        const names = JSON.parse(localNames);
+        if (names.length > 0 && _uiConfig.saved_names.length === 0) patch.saved_names = names;
+      } catch {}
+      localStorage.removeItem('transcript_saved_names');
+    }
+    if (localProfiles) {
+      try {
+        const profiles = JSON.parse(localProfiles);
+        if (profiles.length > 0 && _uiConfig.profiles.length === 0) patch.profiles = profiles;
+      } catch {}
+      localStorage.removeItem('tx_profiles');
+    }
+    if (Object.keys(patch).length > 0) {
+      await patchUiConfig(patch);
+      renderProfiles();
+      showToast('Config local migrada al servidor');
+    }
+  }
+
   // ── Focus View State ───────────────────────────────────────────────────
   let currentView = 'grid';          // 'grid' | 'focus'
   const mutedSpeakers = new Set();   // device_ids benched in focus view
@@ -1250,6 +1335,8 @@
     switch (msg.type) {
       case 'init':
         initSpeakers(msg.data.speakers, msg.data.history);
+        if (msg.data.ui_config) applyUiConfig(msg.data.ui_config);
+        migrateLocalStorage();
         break;
       case 'transcript':
         appendTranscript(msg.data);
@@ -1275,6 +1362,9 @@
       case 'pool_changed':
         renderPoolAssignment(msg.data);
         updatePanelPoolBadges(msg.data);
+        break;
+      case 'ui_config_updated':
+        applyUiConfig(msg.data);
         break;
     }
   }
@@ -1574,6 +1664,12 @@
     }
   }
 
+  function _saveBench() {
+    if (_syncingConfig) return;
+    const serials = [...mutedSpeakers].map(id => DEVICE_SERIALS[id]).filter(Boolean);
+    patchUiConfig({ bench: serials });
+  }
+
   // Bench a speaker — shared between Grid (bench strip) and Focus (sidebar)
   function benchSpeaker(deviceId) {
     if (mutedSpeakers.has(deviceId)) return;
@@ -1591,7 +1687,8 @@
     renderSidebar();
 
     const name = document.getElementById(`name-${deviceId}`)?.textContent || `Speaker ${deviceId}`;
-    showToast(`${name} → bench`);
+    if (!_syncingConfig) showToast(`${name} → bench`);
+    _saveBench();
   }
 
   function muteToSidebar(deviceId) { benchSpeaker(deviceId); }
@@ -1611,11 +1708,12 @@
     renderSidebar();
 
     const name = document.getElementById(`name-${deviceId}`)?.textContent || `Speaker ${deviceId}`;
-    showToast(`${name} restored`);
+    if (!_syncingConfig) showToast(`${name} restored`);
     if (autoScroll) {
       const feed = document.getElementById('focus-feed');
       if (feed) feed.scrollTop = feed.scrollHeight;
     }
+    _saveBench();
   }
 
   function restoreFromSidebar(deviceId) { restoreFromBench(deviceId); }
@@ -1839,24 +1937,21 @@
       `${speakerOrder.length} speaker${speakerOrder.length !== 1 ? 's' : ''}`;
   }
 
-  // ── Saved names (localStorage) ─────────────────────────────────────────
-  const SAVED_NAMES_KEY = 'transcript_saved_names';
-
+  // ── Saved names (server-side) ──────────────────────────────────────────
   function getSavedNames() {
-    try { return JSON.parse(localStorage.getItem(SAVED_NAMES_KEY) || '[]'); }
-    catch { return []; }
+    return _uiConfig.saved_names || [];
   }
 
   function saveNameToList(name) {
-    if (!name || /^Speaker \d+$/.test(name) || /^PORT\w+$/.test(name)) return;
+    // Skip auto-generated labels: "Speaker N", "1L", "2R", etc.
+    if (!name || /^Speaker \d+$/.test(name) || /^\d+[LR]?$/.test(name)) return;
     const names = getSavedNames().filter(n => n !== name);
     names.unshift(name);
-    localStorage.setItem(SAVED_NAMES_KEY, JSON.stringify(names.slice(0, 30)));
+    patchUiConfig({ saved_names: names.slice(0, 30) });
   }
 
   function deleteNameFromList(name) {
-    const names = getSavedNames().filter(n => n !== name);
-    localStorage.setItem(SAVED_NAMES_KEY, JSON.stringify(names));
+    patchUiConfig({ saved_names: getSavedNames().filter(n => n !== name) });
   }
 
   // ── Name context menu ───────────────────────────────────────────────────
@@ -2205,13 +2300,12 @@
     } catch (e) { console.error('setGate failed', e); }
   }
 
-  // ── Profiles ───────────────────────────────────────────────────────────
+  // ── Profiles (server-side) ─────────────────────────────────────────────
   function getProfiles() {
-    try { return JSON.parse(localStorage.getItem('tx_profiles') || '[]'); }
-    catch { return []; }
+    return _uiConfig.profiles || [];
   }
   function _saveProfiles(arr) {
-    localStorage.setItem('tx_profiles', JSON.stringify(arr));
+    patchUiConfig({ profiles: arr });
   }
 
   function renderProfiles() {

@@ -15,7 +15,7 @@ import re
 import time
 from collections import deque
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -96,6 +96,32 @@ def _channel_label(bus_path: str, pw_node_name: str = "", suffix: str = "") -> s
     if bus_path:
         return str(_channel_number(bus_path)) + suffix
     return pw_node_name[-4:].upper() + suffix
+
+# ── Centralized UI config (names, profiles, bench, gains, gates) ──────────────
+
+UI_CONFIG_FILE = Path(__file__).parent / "ui_config.json"
+_ui_config: dict = {}
+
+def _load_ui_config() -> None:
+    global _ui_config
+    defaults: dict = {"saved_names": [], "profiles": [], "bench": [], "gains": {}, "gates": {}}
+    try:
+        if UI_CONFIG_FILE.exists():
+            loaded = json.loads(UI_CONFIG_FILE.read_text(encoding="utf-8"))
+            _ui_config = {**defaults, **loaded}
+            return
+    except Exception as e:
+        logger.warning(f"Could not load ui_config: {e}")
+    _ui_config = defaults
+
+def _save_ui_config() -> None:
+    try:
+        tmp = UI_CONFIG_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(_ui_config, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(UI_CONFIG_FILE)
+    except Exception as e:
+        logger.warning(f"Could not save ui_config: {e}")
+
 
 def _sorted_speakers() -> List[dict]:
     """Active speakers sorted by channel label for consistent grid ordering."""
@@ -359,6 +385,7 @@ async def startup():
     pipeline.on_device_active   = on_device_active
 
     _load_port_map()
+    _load_ui_config()
     logger.info("Discovering audio devices …")
     devices = await audio_manager.discover_bluetooth_devices()
     usb_devices = sorted(
@@ -369,38 +396,44 @@ async def startup():
         if device.is_stereo:
             for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
                 name = _channel_label(device.bus_path, device.pw_node_name, suffix)
+                gain = _ui_config["gains"].get(name, DEFAULT_GAIN_PCT)
+                gate = _ui_config["gates"].get(name, DEFAULT_NOISE_GATE)
                 active_speakers[dev_id] = {
                     "device_id": dev_id,
                     "name": name,
                     "serial": name,
                     "pw_node_name": device.pw_node_name,
                     "mac": device.mac_address,
-                    "gain_pct": DEFAULT_GAIN_PCT,
-                    "noise_gate": DEFAULT_NOISE_GATE,
+                    "gain_pct": gain,
+                    "noise_gate": gate,
                     "bus_path": device.bus_path,
                 }
                 pipeline.register_speaker(dev_id, name)
-                pipeline.set_noise_gate(dev_id, DEFAULT_NOISE_GATE)
+                pipeline.set_noise_gate(dev_id, gate)
                 buffer_mgr.register_device(dev_id, name)
+            # Hardware gain: use L channel value (one physical device)
+            name_l = _channel_label(device.bus_path, device.pw_node_name, "L")
+            _apply_gain(device, _ui_config["gains"].get(name_l, DEFAULT_GAIN_PCT))
             await audio_manager.start_capture(device, callback=on_audio_chunk)
-            _apply_gain(device, DEFAULT_GAIN_PCT)
         else:
             name = _channel_label(device.bus_path, device.pw_node_name)
+            gain = _ui_config["gains"].get(name, DEFAULT_GAIN_PCT)
+            gate = _ui_config["gates"].get(name, DEFAULT_NOISE_GATE)
             active_speakers[device.id] = {
                 "device_id": device.id,
                 "name": name,
                 "serial": name,
                 "pw_node_name": device.pw_node_name,
                 "mac": device.mac_address,
-                "gain_pct": DEFAULT_GAIN_PCT,
-                "noise_gate": DEFAULT_NOISE_GATE,
+                "gain_pct": gain,
+                "noise_gate": gate,
                 "bus_path": device.bus_path,
             }
             pipeline.register_speaker(device.id, name)
-            pipeline.set_noise_gate(device.id, DEFAULT_NOISE_GATE)
+            pipeline.set_noise_gate(device.id, gate)
             buffer_mgr.register_device(device.id, name)
+            _apply_gain(device, gain)
             await audio_manager.start_capture(device, callback=on_audio_chunk)
-            _apply_gain(device, DEFAULT_GAIN_PCT)
 
     pipeline.buffer_mgr = buffer_mgr
     logger.info(f"System ready — {len(active_speakers)} speaker(s) active")
@@ -644,7 +677,11 @@ async def set_gain(req: GainRequest):
         if result.returncode == 0:
             logger.info(f"Device {req.device_id} gain set to {gain}%")
             if req.device_id in active_speakers:
+                serial = active_speakers[req.device_id]["serial"]
                 active_speakers[req.device_id]["gain_pct"] = gain
+                _ui_config.setdefault("gains", {})[serial] = gain
+                _save_ui_config()
+                await broadcast({"type": "ui_config_updated", "data": _ui_config})
             return {"success": True, "gain_pct": gain}
         else:
             return {"success": False, "error": result.stderr.strip()}
@@ -656,7 +693,11 @@ async def set_noise_gate(req: NoiseGateRequest):
     """Set per-device noise gate threshold."""
     pipeline.set_noise_gate(req.device_id, req.value)
     if req.device_id in active_speakers:
+        serial = active_speakers[req.device_id]["serial"]
         active_speakers[req.device_id]["noise_gate"] = req.value
+        _ui_config.setdefault("gates", {})[serial] = req.value
+        _save_ui_config()
+        await broadcast({"type": "ui_config_updated", "data": _ui_config})
     return {"success": True, "value": req.value}
 
 @app.get("/api/get_gain/{device_id}")
@@ -676,6 +717,38 @@ async def get_gain(device_id: int):
         return {"success": True, "gain_pct": gain}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ── UI Config ────────────────────────────────────────────────────────────────
+
+@app.get("/api/ui_config")
+async def get_ui_config():
+    return _ui_config
+
+class UiConfigPatch(BaseModel):
+    saved_names: Optional[List[str]]        = None
+    profiles:    Optional[list]             = None
+    bench:       Optional[List[str]]        = None
+    gains:       Optional[Dict[str, int]]   = None
+    gates:       Optional[Dict[str, float]] = None
+
+@app.post("/api/ui_config")
+async def patch_ui_config(req: UiConfigPatch):
+    changed = False
+    if req.saved_names is not None:
+        _ui_config["saved_names"] = req.saved_names;  changed = True
+    if req.profiles is not None:
+        _ui_config["profiles"]    = req.profiles;     changed = True
+    if req.bench is not None:
+        _ui_config["bench"]       = req.bench;        changed = True
+    if req.gains is not None:
+        _ui_config.setdefault("gains", {}).update(req.gains);  changed = True
+    if req.gates is not None:
+        _ui_config.setdefault("gates", {}).update(req.gates);  changed = True
+    if changed:
+        _save_ui_config()
+        await broadcast({"type": "ui_config_updated", "data": _ui_config})
+    return {"success": True}
 
 
 # ── Pool Assignment ───────────────────────────────────────────────────────────
@@ -716,7 +789,11 @@ async def websocket_endpoint(ws: WebSocket):
 
     await ws.send_text(json.dumps({
         "type": "init",
-        "data": {"speakers": _sorted_speakers(), "history": transcript_history},
+        "data": {
+            "speakers":  _sorted_speakers(),
+            "history":   transcript_history,
+            "ui_config": _ui_config,
+        },
     }))
 
     try:
