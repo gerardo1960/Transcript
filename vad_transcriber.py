@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_RATE              = 16000
 FLUSH_INTERVAL           = 0.3
-MIN_AUDIO_SECS           = 2.0   # minimum audio before considering transcription
+MIN_AUDIO_SECS           = 1.5   # minimum audio before considering transcription
 PRE_ROLL_SECS            = 0.8
 MIN_ENERGY               = 0.002
 SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~1.8s)
-TAIL_SILENCE_SECS        = 0.8  # tail silence in pending audio → phrase boundary
-MAX_WAIT_SECS            = 3.0  # force transcription if no phrase boundary for this long
+TAIL_SILENCE_SECS        = 0.7  # tail silence in pending audio → phrase boundary
+MAX_WAIT_SECS            = 2.0  # force transcription if no phrase boundary for this long
 WHISPER_TIMEOUT_SECS     = 25   # kill a hung Whisper call after this many seconds
 LIVE_RMS_DECAY           = 0.993 # per 30 ms chunk → half-life ~3 s
 
