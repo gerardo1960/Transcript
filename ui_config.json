@@ -1,0 +1,257 @@
+{
+  "saved_names": [
+    "Yoly",
+    "Marcelo",
+    "Brian",
+    "Steven",
+    "Ricardo (Abram)",
+    "Richard",
+    "Uchi",
+    "Abram",
+    "Benjamin Paz",
+    "Mirta",
+    "Karen",
+    "Gerard",
+    "Robert",
+    "Sara",
+    "Inas",
+    "Edward",
+    "Benjamin  Liberman",
+    "Alex",
+    "SARA"
+  ],
+  "profiles": [
+    {
+      "name": "HIJOS",
+      "devices": {
+        "3L": {
+          "speaker_name": "Mirta",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "2L": {
+          "speaker_name": "Edward",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "1L": {
+          "speaker_name": "Alex",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "4L": {
+          "speaker_name": "Yoly",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "3R": {
+          "speaker_name": "Inas",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "2R": {
+          "speaker_name": "Marcelo",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "1R": {
+          "speaker_name": "Benjamin  Liberman",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "4R": {
+          "speaker_name": "Sara",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        }
+      },
+      "font_size": 13,
+      "savedAt": 1778213560325
+    },
+    {
+      "name": "SOBRINOS",
+      "devices": {
+        "3L": {
+          "speaker_name": "Mirta",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "2L": {
+          "speaker_name": "Gerard",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "1L": {
+          "speaker_name": "Robert",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "4L": {
+          "speaker_name": "4L",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "3R": {
+          "speaker_name": "Richard",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "2R": {
+          "speaker_name": "Karen",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "1R": {
+          "speaker_name": "Benjamin  Liberman",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "4R": {
+          "speaker_name": "Sara",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        }
+      },
+      "font_size": 13,
+      "savedAt": 1778213662165
+    },
+    {
+      "name": "Abram, Dr. Bejamin, Gerard, Karen, Uchi, Richard, Ricardo",
+      "devices": {
+        "3L": {
+          "speaker_name": "Uchi",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "2L": {
+          "speaker_name": "Gerard",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "1L": {
+          "speaker_name": "Benjamin Paz",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "4L": {
+          "speaker_name": "Ricardo (Abram)",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "3R": {
+          "speaker_name": "Richard",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "2R": {
+          "speaker_name": "Karen",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "1R": {
+          "speaker_name": "Abram",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "4R": {
+          "speaker_name": "Sara",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        }
+      },
+      "font_size": 13,
+      "savedAt": 1778213785342
+    },
+    {
+      "name": "Steven, Brian, Marcelo, Yoli",
+      "devices": {
+        "3L": {
+          "speaker_name": "3L",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "2L": {
+          "speaker_name": "2L",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "1L": {
+          "speaker_name": "Steven",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "4L": {
+          "speaker_name": "Yoly",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "3R": {
+          "speaker_name": "3R",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "2R": {
+          "speaker_name": "Marcelo",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "1R": {
+          "speaker_name": "Brian",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "4R": {
+          "speaker_name": "Sara",
+          "gain_pct": 90,
+          "noise_gate": 0.02,
+          "benched": false
+        }
+      },
+      "font_size": 13,
+      "savedAt": 1778213890260
+    }
+  ],
+  "bench": [],
+  "gains": {},
+  "gates": {
+    "3L": 0.02,
+    "2L": 0.02,
+    "1L": 0.02,
+    "4L": 0.02,
+    "3R": 0.02,
+    "2R": 0.02,
+    "1R": 0.02,
+    "4R": 0.02
+  }
+}

@@ -23,7 +23,7 @@ from fastapi.responses import HTMLResponse, FileResponse, Response
 from pydantic import BaseModel
 
 from audio_manager import PipeWireAudioManager, AudioDevice
-from vad_transcriber import VADTranscriptionPipeline, TranscriptSegment, EXCLUSIVE_SLOTS
+from vad_transcriber import VADTranscriptionPipeline, TranscriptSegment
 from audio_recorder import AudioBufferManager
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -141,20 +141,17 @@ class CrosstalkSuppressor:
     All operations are O(k) where k = recent segment count (~2-8 typical).
     Uses set intersection — microsecond-level, never blocks the event loop.
 
-    Suppresses segment B only when ALL of these hold:
-      1. Timing: segment A from a different mic arrived within WINDOW_SECS.
-      2. Volume: A.rms >= B.rms * VOLUME_RATIO (A is significantly louder).
-      3. Content: >OVERLAP_THRESHOLD of B's meaningful words appear in A's text.
-    OR (short-bleed edge case):
-      1. B has <= SHORT_WORD_LIMIT words.
-      2. B.rms < NOISE_FLOOR (near-silent mic).
-      3. A.rms >= B.rms * SPIKE_RATIO (A had a massive spike).
-    Double-talk is preserved: if words don't overlap, no suppression.
+    Suppresses segment B when source A is louder AND:
+      - Word overlap >30% (normal case), OR
+      - Source known only via live_rms and is 2× louder (no words committed yet), OR
+      - Short/near-silent bleed with massive spike (edge case).
+    Double-talk is preserved: different words from similar-volume mics are kept.
     """
 
-    WINDOW_SECS       = 12.0   # covers long gaps between exclusive-pool flushes
-    VOLUME_RATIO      = 1.5    # louder mic must be at least 1.5× louder
+    WINDOW_SECS       = 12.0   # history window for committed segments
+    VOLUME_RATIO      = 1.1    # DJI AGC compresses levels — 1.1× is sufficient
     OVERLAP_THRESHOLD = 0.30   # >30 % of weaker mic's content words must match
+    LIVE_ONLY_RATIO   = 2.0    # threshold when source has no committed words yet
     SHORT_WORD_LIMIT  = 3      # segments with ≤3 words get the short-bleed check
     NOISE_FLOOR       = 0.008  # RMS below this = near noise floor
     SPIKE_RATIO       = 3.0    # "massive spike" multiplier for short-bleed case
@@ -193,6 +190,11 @@ class CrosstalkSuppressor:
         are treated as one combined source rather than three separate weak signals.
         live_rms: current audio energy per device — augments historical RMS so that
         a device actively speaking but not yet committed still registers as dominant.
+
+        When a device is only known via live_rms (no committed words), a stricter
+        LIVE_ONLY_RATIO (2×) is used instead of requiring word overlap. This handles
+        the race where the source mic's Whisper call finishes after the bleed mic's
+        hold period expires.
         """
         now = time.time()
         self._purge_old(now)
@@ -212,7 +214,7 @@ class CrosstalkSuppressor:
             dev_words[dev_a] = dev_words.get(dev_a, frozenset()) | words_a
 
         # Augment with live audio energy — catches devices that are loud right now
-        # but haven't committed a transcript recently (pauses, pool timing gaps)
+        # but haven't committed a transcript yet (Whisper still processing)
         if live_rms:
             for dev_id, live in live_rms.items():
                 if dev_id != segment.device_id and live > dev_rms.get(dev_id, 0.0):
@@ -220,8 +222,23 @@ class CrosstalkSuppressor:
 
         for dev_id, rms_a in dev_rms.items():
             words_a = dev_words.get(dev_id, frozenset())
-            if self._is_bleed(rms_b, words_b, wc_b, rms_a, words_a):
+            if words_a:
+                # Source has committed words — use normal volume + overlap check
+                if self._is_bleed(rms_b, words_b, wc_b, rms_a, words_a):
+                    return True
+            elif rms_a >= rms_b * self.LIVE_ONLY_RATIO:
+                # Source only known via live_rms (no committed words yet).
+                # A 2× RMS gap strongly indicates an active dominant speaker.
                 return True
+
+        # Queue-time snapshot: source was already dominant when this audio was captured.
+        # live_rms has decayed since then (Whisper takes 1-4s); use the frozen snapshot.
+        peer_snap = getattr(segment, "dominant_peer_rms", 0.0)
+        if peer_snap >= rms_b * self.LIVE_ONLY_RATIO:
+            max_peer_now = max(dev_rms.values(), default=0.0)
+            if peer_snap > max_peer_now:
+                return True
+
         return False
 
     def record(self, segment) -> None:
@@ -351,6 +368,8 @@ async def on_audio_chunk(device_id: int, pcm: np.ndarray) -> None:
     buffer_mgr.add_chunk(device_id, pcm)
     chunk_rms = float(np.sqrt(np.mean(pcm ** 2)))
     _live_rms[device_id] = max(chunk_rms, _live_rms.get(device_id, 0.0) * LIVE_RMS_DECAY)
+    if pipeline:
+        await pipeline.process_audio_chunk(device_id, pcm)
 
 
 def _apply_gain(device, gain_pct: int):
@@ -750,33 +769,6 @@ async def patch_ui_config(req: UiConfigPatch):
         await broadcast({"type": "ui_config_updated", "data": _ui_config})
     return {"success": True}
 
-
-# ── Pool Assignment ───────────────────────────────────────────────────────────
-
-@app.get("/api/pool_status")
-async def get_pool_status():
-    return pipeline.get_pool_status()
-
-class AssignExclusiveRequest(BaseModel):
-    device_id: int
-    slot_idx:  int
-
-@app.post("/api/assign_exclusive")
-async def assign_exclusive(req: AssignExclusiveRequest):
-    success = pipeline.assign_exclusive(req.device_id, req.slot_idx)
-    if success:
-        await broadcast({"type": "pool_changed", "data": pipeline.get_pool_status()})
-    return {"success": success}
-
-class UnassignRequest(BaseModel):
-    device_id: int
-
-@app.post("/api/unassign_exclusive")
-async def unassign_exclusive(req: UnassignRequest):
-    success = pipeline.unassign_exclusive(req.device_id)
-    if success:
-        await broadcast({"type": "pool_changed", "data": pipeline.get_pool_status()})
-    return {"success": success}
 
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────

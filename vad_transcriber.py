@@ -1,10 +1,8 @@
 """
 vad_transcriber.py
-5-pool Whisper architecture:
-  • Pools 0-3  — exclusive (one dedicated device each)
-  • Pool  4    — shared   (remaining devices, round-robin queue)
-
-Pool assignments are dynamic and controllable via API at runtime.
+Unified worker-pool Whisper architecture:
+  • N identical workers (configured via config.json NUM_WHISPER_PROCESSES)
+  • Single asyncio.Queue — scan loop pushes ready chunks, workers pull and transcribe
 """
 
 import asyncio
@@ -30,10 +28,7 @@ SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing curs
 TAIL_SILENCE_SECS        = 0.5  # tail silence in pending audio → phrase boundary
 MAX_WAIT_SECS            = 3.0  # force transcription if no phrase boundary for this long
 WHISPER_TIMEOUT_SECS     = 25   # kill a hung Whisper call after this many seconds
-
-NUM_POOLS       = 5
-EXCLUSIVE_SLOTS = 4   # pools 0-3
-SHARED_POOL     = 4   # pool 4
+LIVE_RMS_DECAY           = 0.993 # per 30 ms chunk → half-life ~3 s
 
 
 _STOPWORDS = {
@@ -84,7 +79,8 @@ class TranscriptSegment:
     confidence:   float
     timestamp:    float = field(default_factory=time.time)
     is_partial:   bool  = False
-    rms_volume:   float = 0.0
+    rms_volume:        float = 0.0
+    dominant_peer_rms: float = 0.0   # max live_rms of all other devices at queue time
 
 
 class WhisperTranscriber:
@@ -256,21 +252,24 @@ class VADTranscriptionPipeline:
         self.cuda_device  = cuda_device
         self.compute_type = compute_type
 
-        # 5 fixed Whisper pools (0-3 exclusive, 4 shared)
-        self._pools: List[WhisperTranscriber] = [
+        # Load worker count from config.json
+        import json as _json, os as _os
+        _cfg_path = _os.path.join(_os.path.dirname(__file__), "config.json")
+        try:
+            with open(_cfg_path) as _f:
+                _cfg = _json.load(_f)
+        except Exception:
+            _cfg = {}
+        self._num_workers = int(_cfg.get("NUM_WHISPER_PROCESSES", 5))
+
+        self._workers: List[WhisperTranscriber] = [
             WhisperTranscriber(model_size, cuda_device, compute_type)
-            for _ in range(NUM_POOLS)
+            for _ in range(self._num_workers)
         ]
-
-        # Slot → device_id (None = empty)
-        self._exclusive_slots: Dict[int, Optional[int]] = {i: None for i in range(EXCLUSIVE_SLOTS)}
-
-        # device_id → pool index (0-3 exclusive, 4 shared)
-        self._device_pool: Dict[int, int] = {}
-
-        # Flush tasks
-        self._exclusive_flush_tasks: Dict[int, asyncio.Task] = {}
-        self._shared_flush_task: Optional[asyncio.Task]      = None
+        self._work_queue:     asyncio.Queue          = asyncio.Queue()
+        self._queued_devices: set                    = set()
+        self._worker_tasks:   List[asyncio.Task]     = []
+        self._scan_task:      Optional[asyncio.Task] = None
 
         # Per-device state
         self._speaker_names:   Dict[int, str]           = {}
@@ -279,8 +278,8 @@ class VADTranscriptionPipeline:
         self._noise_gate:      Dict[int, float]         = {}
         self._device_language: Dict[int, Optional[str]] = {}
         self._language_streak: Dict[int, int]           = {}
-
-        self._last_tx_time: Dict[int, float] = {}
+        self._last_tx_time:    Dict[int, float]         = {}
+        self._live_rms:        Dict[int, float]         = {}
 
         self.buffer_mgr:         Optional[AudioBufferManager] = None
         self.on_transcript:      Optional[Callable]           = None
@@ -290,26 +289,24 @@ class VADTranscriptionPipeline:
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
     async def load(self) -> None:
-        logger.info(f"Loading {NUM_POOLS} Whisper pools…")
-        for i, pool in enumerate(self._pools):
-            label = f"exclusive slot {i}" if i < EXCLUSIVE_SLOTS else "shared pool"
-            logger.info(f"  Loading pool {i} ({label})…")
-            await pool.load()
-        logger.info("All Whisper pools ready")
-        self._shared_flush_task = asyncio.create_task(
-            self._shared_flush_loop(), name="flush_shared"
-        )
-
-    async def load_all_whispers(self) -> None:
-        pass  # pools are loaded in load()
+        logger.info(f"Loading {self._num_workers} Whisper workers…")
+        for i, w in enumerate(self._workers):
+            logger.info(f"  Loading worker {i}…")
+            await w.load()
+        logger.info("All Whisper workers ready")
+        self._scan_task = asyncio.create_task(self._buffer_scan_loop(), name="buf_scan")
+        self._worker_tasks = [
+            asyncio.create_task(self._worker_loop(i), name=f"worker_{i}")
+            for i in range(self._num_workers)
+        ]
 
     async def shutdown(self) -> None:
-        for task in self._exclusive_flush_tasks.values():
-            task.cancel()
-        if self._shared_flush_task:
-            self._shared_flush_task.cancel()
-        for pool in self._pools:
-            pool.shutdown()
+        if self._scan_task:
+            self._scan_task.cancel()
+        for t in self._worker_tasks:
+            t.cancel()
+        for w in self._workers:
+            w.shutdown()
 
     # ── Speaker registration ───────────────────────────────────────────────
 
@@ -321,32 +318,13 @@ class VADTranscriptionPipeline:
         self._device_language[device_id] = None
         self._language_streak[device_id] = 0
         self._last_tx_time[device_id]    = time.time()
-
-        # Fill first available exclusive slot; otherwise shared
-        for slot_idx in range(EXCLUSIVE_SLOTS):
-            if self._exclusive_slots[slot_idx] is None:
-                self._exclusive_slots[slot_idx] = device_id
-                self._device_pool[device_id]    = slot_idx
-                task = asyncio.create_task(
-                    self._exclusive_flush_loop(device_id, slot_idx),
-                    name=f"flush_exc{slot_idx}_{device_id}",
-                )
-                self._exclusive_flush_tasks[device_id] = task
-                logger.info(f"Registered: {name} (device {device_id}) → exclusive slot {slot_idx}")
-                return
-
-        self._device_pool[device_id] = SHARED_POOL
-        logger.info(f"Registered: {name} (device {device_id}) → shared pool")
+        logger.info(f"Registered: {name} (device {device_id})")
 
     def unregister_speaker(self, device_id: int) -> None:
-        pool_idx = self._device_pool.pop(device_id, None)
-        if pool_idx is not None and pool_idx < EXCLUSIVE_SLOTS:
-            self._exclusive_slots[pool_idx] = None
-            if task := self._exclusive_flush_tasks.pop(device_id, None):
-                task.cancel()
+        self._queued_devices.discard(device_id)
         for d in (self._speaker_names, self._device_active, self._silence_streak,
                   self._noise_gate, self._device_language, self._language_streak,
-                  self._last_tx_time):
+                  self._last_tx_time, self._live_rms):
             d.pop(device_id, None)
 
     def update_speaker_name(self, device_id: int, name: str) -> None:
@@ -356,65 +334,11 @@ class VADTranscriptionPipeline:
         self._noise_gate[device_id] = max(0.001, min(0.5, value))
         logger.info(f"Device {device_id} noise gate → {value:.4f}")
 
-    # ── Pool assignment (called from API) ─────────────────────────────────
-
-    def assign_exclusive(self, device_id: int, slot_idx: int) -> bool:
-        """Assign device to an exclusive slot. Displaces current occupant to shared."""
-        if slot_idx < 0 or slot_idx >= EXCLUSIVE_SLOTS:
-            return False
-        if device_id not in self._device_pool:
-            return False
-
-        # Evict current occupant → shared
-        occupant = self._exclusive_slots[slot_idx]
-        if occupant is not None and occupant != device_id:
-            if task := self._exclusive_flush_tasks.pop(occupant, None):
-                task.cancel()
-            self._device_pool[occupant] = SHARED_POOL
-            self._exclusive_slots[slot_idx] = None
-            logger.info(f"Device {occupant} displaced from slot {slot_idx} → shared")
-
-        # Remove device from its current slot if exclusive
-        old_pool = self._device_pool.get(device_id)
-        if old_pool is not None and old_pool < EXCLUSIVE_SLOTS:
-            self._exclusive_slots[old_pool] = None
-            if task := self._exclusive_flush_tasks.pop(device_id, None):
-                task.cancel()
-
-        # Assign
-        self._exclusive_slots[slot_idx] = device_id
-        self._device_pool[device_id]    = slot_idx
-        task = asyncio.create_task(
-            self._exclusive_flush_loop(device_id, slot_idx),
-            name=f"flush_exc{slot_idx}_{device_id}",
-        )
-        self._exclusive_flush_tasks[device_id] = task
-        logger.info(f"Device {device_id} → exclusive slot {slot_idx}")
-        return True
-
-    def unassign_exclusive(self, device_id: int) -> bool:
-        """Move device from exclusive slot to shared pool."""
-        pool_idx = self._device_pool.get(device_id)
-        if pool_idx is None or pool_idx >= EXCLUSIVE_SLOTS:
-            return False
-        self._exclusive_slots[pool_idx] = None
-        if task := self._exclusive_flush_tasks.pop(device_id, None):
-            task.cancel()
-        self._device_pool[device_id] = SHARED_POOL
-        logger.info(f"Device {device_id} → shared pool")
-        return True
-
-    def get_pool_status(self) -> dict:
-        return {
-            "exclusive_slots": {str(k): v for k, v in self._exclusive_slots.items()},
-            "device_pool":     {str(k): v for k, v in self._device_pool.items()},
-            "shared_devices":  [d for d, p in self._device_pool.items() if p == SHARED_POOL],
-        }
-
     # ── Audio ingestion (no-op: buffer managed by app.py) ────────────────
 
     async def process_audio_chunk(self, device_id: int, pcm: np.ndarray) -> None:
-        pass
+        chunk_rms = float(np.sqrt(np.mean(pcm ** 2)))
+        self._live_rms[device_id] = max(chunk_rms, self._live_rms.get(device_id, 0.0) * LIVE_RMS_DECAY)
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
@@ -457,53 +381,17 @@ class VADTranscriptionPipeline:
             )
         return True
 
-    # ── Flush loops ───────────────────────────────────────────────────────
+    # ── Scan loop + worker loops ──────────────────────────────────────────
 
-    async def _exclusive_flush_loop(self, device_id: int, pool_idx: int) -> None:
-        whisper = self._pools[pool_idx]
+    async def _buffer_scan_loop(self) -> None:
+        """Scan all registered devices every FLUSH_INTERVAL; push ready chunks to queue."""
         while True:
             await asyncio.sleep(FLUSH_INTERVAL)
             if not self.buffer_mgr:
                 continue
-            buf = self.buffer_mgr.get_buffer(device_id)
-            if buf is None:
-                continue
-            audio = buf.get_pending()
-            if audio is None or len(audio) < int(MIN_AUDIO_SECS * SAMPLE_RATE):
-                continue
-            if self._handle_silence(device_id, audio, buf):
-                continue
-
-            # Only transcribe at a phrase boundary or when forced by timer
-            tail = audio[-int(TAIL_SILENCE_SECS * SAMPLE_RATE):]
-            tail_rms = float(np.sqrt(np.mean(tail ** 2)))
-            threshold = self._noise_gate.get(device_id, MIN_ENERGY)
-            at_boundary = tail_rms < threshold
-            force = (time.time() - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
-            if not at_boundary and not force:
-                continue
-
-            if whisper._busy:
-                continue
-            asyncio.ensure_future(self._transcribe_and_emit(
-                audio, len(audio), device_id,
-                self._speaker_names.get(device_id, f"Speaker {device_id}"),
-                buf, pool_idx,
-            ))
-
-    async def _shared_flush_loop(self) -> None:
-        rr_index = 0
-        while True:
-            await asyncio.sleep(FLUSH_INTERVAL)
-            if not self.buffer_mgr:
-                continue
-            shared = [d for d, p in self._device_pool.items() if p == SHARED_POOL]
-            if not shared:
-                continue
-            whisper = self._pools[SHARED_POOL]
-            n = len(shared)
-            for i in range(n):
-                device_id = shared[(rr_index + i) % n]
+            for device_id in list(self._speaker_names.keys()):
+                if device_id in self._queued_devices:
+                    continue
                 buf = self.buffer_mgr.get_buffer(device_id)
                 if buf is None:
                     continue
@@ -512,7 +400,6 @@ class VADTranscriptionPipeline:
                     continue
                 if self._handle_silence(device_id, audio, buf):
                     continue
-
                 tail = audio[-int(TAIL_SILENCE_SECS * SAMPLE_RATE):]
                 tail_rms = float(np.sqrt(np.mean(tail ** 2)))
                 threshold = self._noise_gate.get(device_id, MIN_ENERGY)
@@ -520,23 +407,40 @@ class VADTranscriptionPipeline:
                 force = (time.time() - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
                 if not at_boundary and not force:
                     continue
-
-                if whisper._busy:
-                    break  # come back next tick
-                rr_index = (rr_index + i + 1) % n
-                asyncio.ensure_future(self._transcribe_and_emit(
-                    audio, len(audio), device_id,
+                dominant_peer_rms = max(
+                    (v for k, v in self._live_rms.items() if k != device_id),
+                    default=0.0,
+                )
+                self._queued_devices.add(device_id)
+                await self._work_queue.put((
+                    device_id, audio, len(audio),
                     self._speaker_names.get(device_id, f"Speaker {device_id}"),
-                    buf, SHARED_POOL,
+                    buf,
+                    dominant_peer_rms,
                 ))
-                break  # one transcription per tick
 
-    async def _transcribe_and_emit(self, audio, n_samples, device_id, speaker_name, buf, pool_idx):
-        whisper    = self._pools[pool_idx]
+    async def _worker_loop(self, worker_idx: int) -> None:
+        """Pull work items from the queue and transcribe them."""
+        whisper = self._workers[worker_idx]
+        while True:
+            device_id, audio, n_samples, speaker_name, buf, dominant_peer_rms = \
+                await self._work_queue.get()
+            try:
+                await self._transcribe_and_emit(
+                    audio, n_samples, device_id, speaker_name, buf, worker_idx,
+                    dominant_peer_rms,
+                )
+            finally:
+                self._work_queue.task_done()
+
+    async def _transcribe_and_emit(self, audio, n_samples, device_id, speaker_name, buf, worker_idx,
+                                    dominant_peer_rms: float = 0.0):
+        whisper    = self._workers[worker_idx]
         rms_volume = float(np.sqrt(np.mean(audio[:n_samples] ** 2)))
-        logger.info(f"dev={device_id} → Whisper pool={pool_idx} audio={n_samples/SAMPLE_RATE:.2f}s rms={rms_volume:.4f}")
+        logger.info(f"dev={device_id} → Whisper worker={worker_idx} audio={n_samples/SAMPLE_RATE:.2f}s rms={rms_volume:.4f} peer_rms={dominant_peer_rms:.4f}")
         segment  = await whisper.transcribe(audio)
         buf.mark_transcribed(n_samples)
+        self._queued_devices.discard(device_id)   # release AFTER mark_transcribed — prevents re-queue during Whisper
         self._last_tx_time[device_id] = time.time()
 
         # Language momentum (informational only — never force)
@@ -564,9 +468,10 @@ class VADTranscriptionPipeline:
         text  = segment.text if segment else None
         logger.info(f"dev={device_id} lang={lang}({prob:.2f}) → {repr(text)}")
         if segment and segment.text.strip():
-            segment.device_id    = device_id
-            segment.speaker_name = speaker_name
-            segment.rms_volume   = rms_volume
+            segment.device_id         = device_id
+            segment.speaker_name      = speaker_name
+            segment.rms_volume        = rms_volume
+            segment.dominant_peer_rms = dominant_peer_rms
             if self.on_transcript:
                 try:
                     await self.on_transcript(segment)
