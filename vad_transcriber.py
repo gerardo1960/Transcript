@@ -27,6 +27,7 @@ MIN_ENERGY               = 0.002
 SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~1.8s)
 TAIL_SILENCE_SECS        = 0.7  # tail silence in pending audio → phrase boundary
 MAX_WAIT_SECS            = 2.0  # force transcription if no phrase boundary for this long
+MAX_AUDIO_SECS           = 30.0 # cap chunk size sent to Whisper to avoid worker saturation
 WHISPER_TIMEOUT_SECS     = 25   # kill a hung Whisper call after this many seconds
 LIVE_RMS_DECAY           = 0.993 # per 30 ms chunk → half-life ~3 s
 
@@ -230,6 +231,10 @@ class WhisperTranscriber:
             "aleluya.", "aleluya", "hallelujah.", "hallelujah",
             "dios mío.", "dios mío", "ay, dios mío.", "ay, dios mío",
             "bendito sea dios.", "bendito sea dios",
+            # French hallucinations (Whisper misclassifies French audio as es/en)
+            "oui.", "oui", "oui oui.", "oui, oui.", "oui oui", "oui, oui",
+            "merci.", "merci", "bonjour.", "bonjour", "bonsoir.", "bonsoir",
+            "au revoir.", "au revoir", "s'il vous plaît.", "s'il vous plaît",
         }
         full_text = " ".join(texts).strip()
         if full_text.lower() in HALLUCINATIONS:
@@ -282,14 +287,12 @@ class VADTranscriptionPipeline:
         self._scan_task:      Optional[asyncio.Task] = None
 
         # Per-device state
-        self._speaker_names:   Dict[int, str]           = {}
-        self._device_active:   Dict[int, bool]          = {}
-        self._silence_streak:  Dict[int, int]           = {}
-        self._noise_gate:      Dict[int, float]         = {}
-        self._device_language: Dict[int, Optional[str]] = {}
-        self._language_streak: Dict[int, int]           = {}
-        self._last_tx_time:    Dict[int, float]         = {}
-        self._live_rms:        Dict[int, float]         = {}
+        self._speaker_names:  Dict[int, str]   = {}
+        self._device_active:  Dict[int, bool]  = {}
+        self._silence_streak: Dict[int, int]   = {}
+        self._noise_gate:     Dict[int, float] = {}
+        self._last_tx_time:   Dict[int, float] = {}
+        self._live_rms:       Dict[int, float] = {}
 
         self.buffer_mgr:         Optional[AudioBufferManager] = None
         self.on_transcript:      Optional[Callable]           = None
@@ -321,20 +324,17 @@ class VADTranscriptionPipeline:
     # ── Speaker registration ───────────────────────────────────────────────
 
     def register_speaker(self, device_id: int, name: str) -> None:
-        self._speaker_names[device_id]   = name
-        self._device_active[device_id]   = True
-        self._silence_streak[device_id]  = 0
-        self._noise_gate[device_id]      = MIN_ENERGY
-        self._device_language[device_id] = None
-        self._language_streak[device_id] = 0
-        self._last_tx_time[device_id]    = time.time()
+        self._speaker_names[device_id]  = name
+        self._device_active[device_id]  = True
+        self._silence_streak[device_id] = 0
+        self._noise_gate[device_id]     = MIN_ENERGY
+        self._last_tx_time[device_id]   = time.time()
         logger.info(f"Registered: {name} (device {device_id})")
 
     def unregister_speaker(self, device_id: int) -> None:
         self._queued_devices.discard(device_id)
         for d in (self._speaker_names, self._device_active, self._silence_streak,
-                  self._noise_gate, self._device_language, self._language_streak,
-                  self._last_tx_time, self._live_rms):
+                  self._noise_gate, self._last_tx_time, self._live_rms):
             d.pop(device_id, None)
 
     def update_speaker_name(self, device_id: int, name: str) -> None:
@@ -417,12 +417,16 @@ class VADTranscriptionPipeline:
                 force = (time.time() - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
                 if not at_boundary and not force:
                     continue
+                n_full = len(audio)
+                max_samples = int(MAX_AUDIO_SECS * SAMPLE_RATE)
+                if n_full > max_samples:
+                    audio = audio[-max_samples:]  # keep most recent audio (contains speech)
                 n_samples = len(audio)
                 dominant_peer_rms = max(
                     (v for k, v in self._live_rms.items() if k != device_id),
                     default=0.0,
                 )
-                buf.mark_transcribed(n_samples)   # advance cursor NOW so same audio is never re-queued
+                buf.mark_transcribed(n_full)   # advance cursor past ALL pending (including discarded prefix)
                 self._queued_devices.add(device_id)
                 await self._work_queue.put((
                     device_id, audio, n_samples,
@@ -454,36 +458,10 @@ class VADTranscriptionPipeline:
         # mark_transcribed was already called at queue time in _buffer_scan_loop
         self._last_tx_time[device_id] = time.time()
 
-        # Language momentum (informational only — never force)
-        detected      = whisper.last_detected_language
-        detected_prob = whisper.last_detected_language_probability
-        current_lang  = self._device_language.get(device_id)
-        if detected in ("en", "es"):
-            if current_lang is None:
-                if detected_prob >= 0.85:
-                    self._device_language[device_id] = detected
-                    self._language_streak[device_id] = 0
-                    logger.info(f"Device {device_id}: language locked to '{detected}' (p={detected_prob:.2f})")
-            elif detected == current_lang:
-                self._language_streak[device_id] = 0
-            elif detected_prob >= 0.85:
-                streak = self._language_streak.get(device_id, 0) + 1
-                self._language_streak[device_id] = streak
-                if streak >= 3:
-                    logger.info(f"Device {device_id}: language '{current_lang}'→'{detected}' after {streak} chunks")
-                    self._device_language[device_id] = detected
-                    self._language_streak[device_id] = 0
-
-        lang  = whisper.last_detected_language
-        prob  = whisper.last_detected_language_probability
-        text  = segment.text if segment else None
+        lang = whisper.last_detected_language
+        prob = whisper.last_detected_language_probability
+        text = segment.text if segment else None
         logger.info(f"dev={device_id} lang={lang}({prob:.2f}) → {repr(text)}")
-        # Reject if the device is language-locked and Whisper detected a different language
-        # with at least 50% confidence — catches hallucinations like "Thank you for watching."
-        if segment and segment.text.strip() and current_lang is not None:
-            if lang != current_lang and prob >= 0.50:
-                logger.info(f"dev={device_id}: rejected '{text[:50]}' (lang={lang} p={prob:.2f}, locked={current_lang})")
-                return
         if segment and segment.text.strip():
             segment.device_id         = device_id
             segment.speaker_name      = speaker_name
