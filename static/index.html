@@ -766,6 +766,34 @@
       color: var(--accent);
     }
 
+    /* ─── Mode Toggle ────────────────────────────────────────────────── */
+    #mode-toggle {
+      display: flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .mode-btn {
+      font-size: 12px;
+      font-family: var(--font-ui);
+      padding: 5px 10px;
+      color: var(--text-dim);
+      transition: all var(--transition);
+      white-space: nowrap;
+    }
+    .mode-btn.mode-active {
+      background: color-mix(in srgb, var(--accent) 20%, transparent);
+      color: var(--accent);
+    }
+    /* Partial transcript entry — slightly dimmed until confirmed */
+    .transcript-entry.partial .transcript-text,
+    .feed-msg.partial .feed-text {
+      opacity: 0.55;
+      font-style: italic;
+    }
+
     /* ─── Focus Stream View ──────────────────────────────────────────── */
     #focus-view {
       display: none;
@@ -1105,6 +1133,10 @@
           oninput="changeFontSize(this.value)" />
         <span style="font-size:18px;color:var(--text-dim);font-family:var(--font-mono)">A</span>
       </div>
+      <div id="mode-toggle" title="Modo de transcripción">
+        <div id="mode-btn-precise" class="mode-btn mode-active" onclick="setMode('precise')">Preciso</div>
+        <div id="mode-btn-instant" class="mode-btn" onclick="setMode('instant')">Instant</div>
+      </div>
       <button id="view-toggle-btn" onclick="toggleView()">⊞ Focus</button>
       <button id="settings-btn" onclick="openSettings()">⚙ Settings</button>
     </div>
@@ -1329,6 +1361,18 @@
       case 'transcript':
         appendTranscript(msg.data);
         break;
+      case 'transcript_partial':
+        appendTranscript(msg.data, true, true);
+        break;
+      case 'transcript_update':
+        updateTranscript(msg.data);
+        break;
+      case 'transcript_remove':
+        removeTranscript(msg.data.chunk_id);
+        break;
+      case 'mode_changed':
+        _applyModeUI(msg.data.mode);
+        break;
       case 'speaker_added':
         addSpeakerPanel(msg.data);
         break;
@@ -1511,7 +1555,7 @@
   }
 
   // ── Transcripts ────────────────────────────────────────────────────────
-  function appendTranscript(data, animate = true) {
+  function appendTranscript(data, animate = true, partial = false) {
     // ── Grid view panel ──
     const area = document.getElementById(`transcript-${data.device_id}`);
     if (area) {
@@ -1521,7 +1565,8 @@
       if (langEl && data.language) langEl.textContent = data.language.toUpperCase();
 
       const entry = document.createElement('div');
-      entry.className = 'transcript-entry';
+      entry.className = 'transcript-entry' + (partial ? ' partial' : '');
+      if (data.chunk_id) entry.dataset.chunkId = data.chunk_id;
       if (!animate) entry.style.animation = 'none';
       const ts = new Date(data.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
       const currentSize = document.getElementById('font-slider').value;
@@ -1548,7 +1593,7 @@
         speakingTimers[`chip-${data.device_id}`] = setTimeout(() => chip.classList.remove('chip-speaking'), 2500);
       }
     } else {
-      appendToFocusFeed(data, animate);
+      appendToFocusFeed(data, animate, partial);
       // Flash white border on grid panel for 2s
       const panel = document.getElementById(`panel-${data.device_id}`);
       if (panel) {
@@ -1559,6 +1604,50 @@
     }
 
     markSpeaking(data.device_id);
+  }
+
+  function updateTranscript(data) {
+    if (!data.chunk_id) return;
+    // Update grid panel entry
+    const entry = document.querySelector(`.transcript-entry[data-chunk-id="${data.chunk_id}"]`);
+    if (entry) {
+      entry.classList.remove('partial');
+      const textEl = entry.querySelector('.transcript-text');
+      if (textEl) textEl.textContent = data.text;
+    }
+    // Update focus feed entry
+    const feedMsg = document.querySelector(`.feed-msg[data-chunk-id="${data.chunk_id}"]`);
+    if (feedMsg) {
+      feedMsg.classList.remove('partial');
+      const textEl = feedMsg.querySelector('.feed-text');
+      if (textEl) textEl.textContent = data.text;
+    }
+  }
+
+  function removeTranscript(chunkId) {
+    if (!chunkId) return;
+    document.querySelectorAll(`[data-chunk-id="${chunkId}"]`).forEach(el => el.remove());
+  }
+
+  // ── Transcription mode ─────────────────────────────────────────────────
+  let _txMode = localStorage.getItem('tx_mode') || 'precise';
+
+  function _applyModeUI(mode) {
+    _txMode = mode;
+    document.getElementById('mode-btn-precise').classList.toggle('mode-active', mode === 'precise');
+    document.getElementById('mode-btn-instant').classList.toggle('mode-active', mode === 'instant');
+  }
+
+  function setMode(mode) {
+    if (mode === _txMode) return;
+    _txMode = mode;
+    localStorage.setItem('tx_mode', mode);
+    _applyModeUI(mode);
+    fetch('/api/mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode}),
+    });
   }
 
   function markSpeaking(deviceId) {
@@ -1587,7 +1676,7 @@
   }
 
   // ── Focus Feed ─────────────────────────────────────────────────────────
-  function appendToFocusFeed(data, animate = true) {
+  function appendToFocusFeed(data, animate = true, partial = false) {
     const feed = document.getElementById('focus-feed');
     if (!feed) return;
 
@@ -1603,8 +1692,9 @@
     const fontSize = document.getElementById('font-slider')?.value || 13;
 
     const msg = document.createElement('div');
-    msg.className = 'feed-msg';
+    msg.className = 'feed-msg' + (partial ? ' partial' : '');
     msg.dataset.deviceId = data.device_id;
+    if (data.chunk_id) msg.dataset.chunkId = data.chunk_id;
     if (!animate) msg.style.animation = 'none';
     msg.innerHTML = `
       <span class="feed-ts">${ts}</span>
@@ -2346,6 +2436,12 @@
   }
 
   // ── Init ───────────────────────────────────────────────────────────────
+  _applyModeUI(_txMode);
+  fetch('/api/mode', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({mode: _txMode}),
+  });
   connect();
 
   // Reconnect when tab becomes visible again (after notification/suspend)

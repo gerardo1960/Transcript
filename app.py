@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse, Response
 from pydantic import BaseModel
 
@@ -311,6 +311,25 @@ async def on_transcript_received(segment: TranscriptSegment) -> None:
     _pending_segments.append((time.time(), segment))
 
 
+async def on_transcript_partial_received(segment: TranscriptSegment) -> None:
+    """Broadcast instant partial result immediately, bypassing crosstalk suppression."""
+    entry = {
+        "device_id":    segment.device_id,
+        "speaker_name": segment.speaker_name,
+        "text":         segment.text,
+        "language":     segment.language,
+        "confidence":   round(segment.confidence, 3),
+        "timestamp":    segment.timestamp,
+        "chunk_id":     segment.chunk_id,
+    }
+    await broadcast({"type": "transcript_partial", "data": entry})
+
+
+async def on_transcript_remove_received(chunk_id: str, device_id: int) -> None:
+    """Tell clients to remove a partial that the large model filtered out."""
+    await broadcast({"type": "transcript_remove", "data": {"chunk_id": chunk_id, "device_id": device_id}})
+
+
 async def _flush_pending_loop() -> None:
     """
     Process pending segments every 80ms.
@@ -370,17 +389,16 @@ async def _flush_pending_loop() -> None:
 
         # ── Phase 2: historical + broadcast ──────────────────────────────
         for i, (seg, rms_b, words_b, wc_b) in enumerate(meta):
-            if i in batch_suppressed:
+            suppressed = (i in batch_suppressed) or crosstalk.check_against_history(seg, _live_rms)
+            if suppressed:
+                label = "BATCH" if i in batch_suppressed else "HIST"
                 logger.info(
-                    f"[CROSSTALK-BATCH] suppressed {seg.speaker_name} "
+                    f"[CROSSTALK-{label}] suppressed {seg.speaker_name} "
                     f"rms={rms_b:.4f}: {seg.text[:60]}"
                 )
-                continue
-            if crosstalk.check_against_history(seg, _live_rms):
-                logger.info(
-                    f"[CROSSTALK-HIST] suppressed {seg.speaker_name} "
-                    f"rms={rms_b:.4f}: {seg.text[:60]}"
-                )
+                if seg.chunk_id:
+                    await broadcast({"type": "transcript_remove",
+                                     "data": {"chunk_id": seg.chunk_id, "device_id": seg.device_id}})
                 continue
             crosstalk.record(seg)
             entry = {
@@ -391,11 +409,14 @@ async def _flush_pending_loop() -> None:
                 "confidence":   round(seg.confidence, 3),
                 "timestamp":    seg.timestamp,
             }
+            if seg.chunk_id:
+                entry["chunk_id"] = seg.chunk_id
             history = transcript_history.setdefault(seg.device_id, [])
             history.append(entry)
             if len(history) > MAX_TRANSCRIPT_HISTORY:
                 history.pop(0)
-            await broadcast({"type": "transcript", "data": entry})
+            event_type = "transcript_update" if seg.chunk_id else "transcript"
+            await broadcast({"type": event_type, "data": entry})
             logger.info(f"[{seg.speaker_name}] rms={rms_b:.4f} ({seg.language}): {seg.text[:80]}")
 
 
@@ -427,7 +448,9 @@ def _apply_gain(device, gain_pct: int):
 async def startup():
     logger.info("Loading Whisper model …")
     await pipeline.load()
-    pipeline.on_transcript = on_transcript_received
+    pipeline.on_transcript         = on_transcript_received
+    pipeline.on_transcript_partial = on_transcript_partial_received
+    pipeline.on_transcript_remove  = on_transcript_remove_received
 
     async def on_device_inactive(device_id: int):
         await broadcast({"type": "speaker_inactive", "data": {"device_id": device_id}})
@@ -805,6 +828,18 @@ async def patch_ui_config(req: UiConfigPatch):
         _save_ui_config()
         await broadcast({"type": "ui_config_updated", "data": _ui_config})
     return {"success": True}
+
+
+class ModeRequest(BaseModel):
+    mode: str  # "precise" or "instant"
+
+@app.post("/api/mode")
+async def set_transcription_mode(req: ModeRequest):
+    if req.mode not in ("precise", "instant"):
+        raise HTTPException(status_code=400, detail="mode must be 'precise' or 'instant'")
+    pipeline.set_instant_mode(req.mode == "instant")
+    await broadcast({"type": "mode_changed", "data": {"mode": req.mode}})
+    return {"ok": True, "mode": req.mode}
 
 
 

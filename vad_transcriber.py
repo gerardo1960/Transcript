@@ -9,6 +9,7 @@ import asyncio
 import logging
 import re
 import time
+import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -90,6 +91,7 @@ class TranscriptSegment:
     confidence:   float
     timestamp:    float = field(default_factory=time.time)
     is_partial:   bool  = False
+    chunk_id:     Optional[str] = None
     rms_volume:        float = 0.0
     dominant_peer_rms: float = 0.0   # max live_rms of all other devices at queue time
 
@@ -295,12 +297,21 @@ class VADTranscriptionPipeline:
         self._last_tx_time:   Dict[int, float] = {}
         self._live_rms:       Dict[int, float] = {}
 
-        self.buffer_mgr:         Optional[AudioBufferManager] = None
-        self.on_transcript:      Optional[Callable]           = None
-        self.on_device_inactive: Optional[Callable]           = None
-        self.on_device_active:   Optional[Callable]           = None
+        self._instant_mode = False
+        self._fast_worker: Optional[WhisperTranscriber] = None
+
+        self.buffer_mgr:              Optional[AudioBufferManager] = None
+        self.on_transcript:           Optional[Callable]           = None
+        self.on_transcript_partial:   Optional[Callable]           = None
+        self.on_transcript_remove:    Optional[Callable]           = None
+        self.on_device_inactive:      Optional[Callable]           = None
+        self.on_device_active:        Optional[Callable]           = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
+
+    def set_instant_mode(self, enabled: bool) -> None:
+        self._instant_mode = enabled
+        logger.info(f"Transcription mode: {'instant' if enabled else 'precise'}")
 
     async def load(self) -> None:
         logger.info(f"Loading {self._num_workers} Whisper workers…")
@@ -308,6 +319,10 @@ class VADTranscriptionPipeline:
             logger.info(f"  Loading worker {i}…")
             await w.load()
         logger.info("All Whisper workers ready")
+        logger.info("Loading fast Whisper worker (small) for Instant mode…")
+        self._fast_worker = WhisperTranscriber("small", self.cuda_device, self.compute_type)
+        await self._fast_worker.load()
+        logger.info("Fast worker ready")
         self._scan_task = asyncio.create_task(self._buffer_scan_loop(), name="buf_scan")
         self._worker_tasks = [
             asyncio.create_task(self._worker_loop(i), name=f"worker_{i}")
@@ -321,6 +336,8 @@ class VADTranscriptionPipeline:
             t.cancel()
         for w in self._workers:
             w.shutdown()
+        if self._fast_worker:
+            self._fast_worker.shutdown()
 
     # ── Speaker registration ───────────────────────────────────────────────
 
@@ -455,7 +472,29 @@ class VADTranscriptionPipeline:
         whisper    = self._workers[worker_idx]
         rms_volume = float(np.sqrt(np.mean(audio[:n_samples] ** 2)))
         logger.info(f"dev={device_id} → Whisper worker={worker_idx} audio={n_samples/SAMPLE_RATE:.2f}s rms={rms_volume:.4f} peer_rms={dominant_peer_rms:.4f}")
-        segment  = await whisper.transcribe(audio)
+
+        chunk_id       = None
+        partial_emitted = False
+
+        if self._instant_mode and self._fast_worker:
+            chunk_id = uuid.uuid4().hex[:12]
+            fast_seg = await self._fast_worker.transcribe(audio)
+            self._last_tx_time[device_id] = time.time()
+            if fast_seg and fast_seg.text.strip():
+                fast_seg.device_id         = device_id
+                fast_seg.speaker_name      = speaker_name
+                fast_seg.rms_volume        = rms_volume
+                fast_seg.dominant_peer_rms = dominant_peer_rms
+                fast_seg.is_partial        = True
+                fast_seg.chunk_id          = chunk_id
+                if self.on_transcript_partial:
+                    try:
+                        await self.on_transcript_partial(fast_seg)
+                        partial_emitted = True
+                    except Exception as e:
+                        logger.error(f"Partial transcript callback error: {e}")
+
+        segment = await whisper.transcribe(audio)
         # mark_transcribed was already called at queue time in _buffer_scan_loop
         self._last_tx_time[device_id] = time.time()
 
@@ -468,8 +507,15 @@ class VADTranscriptionPipeline:
             segment.speaker_name      = speaker_name
             segment.rms_volume        = rms_volume
             segment.dominant_peer_rms = dominant_peer_rms
+            segment.chunk_id          = chunk_id if partial_emitted else None
             if self.on_transcript:
                 try:
                     await self.on_transcript(segment)
                 except Exception as e:
                     logger.error(f"Transcript callback error: {e}")
+        elif partial_emitted and self.on_transcript_remove:
+            # Large model filtered the audio (hallucination) — clean up the partial
+            try:
+                await self.on_transcript_remove(chunk_id, device_id)
+            except Exception as e:
+                logger.error(f"Transcript remove callback error: {e}")
