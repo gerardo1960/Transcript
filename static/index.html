@@ -1318,7 +1318,7 @@
   }
 
   // ── Focus View State ───────────────────────────────────────────────────
-  let currentView = 'grid';          // 'grid' | 'focus'
+  let currentView = 'focus';          // 'grid' | 'focus'
   const mutedSpeakers = new Set();   // device_ids benched in focus view
   const MAX_FEED_MSGS = 300;
 
@@ -2443,6 +2443,19 @@
     body: JSON.stringify({mode: _txMode}),
   });
   connect();
+
+  // Initialize focus view on load
+  (function() {
+    const grid       = document.getElementById('grid');
+    const benchStrip = document.getElementById('bench-strip');
+    const focusView  = document.getElementById('focus-view');
+    const btn        = document.getElementById('view-toggle-btn');
+    grid.style.display = 'none';
+    benchStrip.style.display = 'none';
+    focusView.classList.add('active');
+    btn.textContent = '⊟ Grid';
+    btn.classList.add('focus-active');
+  })();
 
   // Reconnect when tab becomes visible again (after notification/suspend)
   document.addEventListener('visibilitychange', () => {
