@@ -1134,8 +1134,8 @@
         <span style="font-size:18px;color:var(--text-dim);font-family:var(--font-mono)">A</span>
       </div>
       <div id="mode-toggle" title="Modo de transcripción">
-        <div id="mode-btn-precise" class="mode-btn mode-active" onclick="setMode('precise')">Preciso</div>
-        <div id="mode-btn-instant" class="mode-btn" onclick="setMode('instant')">Instant</div>
+        <div id="mode-btn-precise" class="mode-btn" onclick="setMode('precise')">Preciso</div>
+        <div id="mode-btn-instant" class="mode-btn mode-active" onclick="setMode('instant')">Instant</div>
       </div>
       <button id="view-toggle-btn" onclick="toggleView()">⊞ Focus</button>
       <button id="settings-btn" onclick="openSettings()">⚙ Settings</button>
@@ -1630,7 +1630,7 @@
   }
 
   // ── Transcription mode ─────────────────────────────────────────────────
-  let _txMode = localStorage.getItem('tx_mode') || 'precise';
+  let _txMode = localStorage.getItem('tx_mode') || 'instant';
 
   function _applyModeUI(mode) {
     _txMode = mode;
