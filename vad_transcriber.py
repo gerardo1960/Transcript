@@ -195,6 +195,7 @@ class WhisperTranscriber:
 
         HALLUCINATIONS = {
             "thank you.", "thanks for watching.", "thanks for watching",
+            "thank you for watching.", "thank you for watching",
             "okay.", "ok.", "bye.", "bye bye.", "gracias.", "¡gracias!", "gracias!",
             "adiós.", "adios.", "de nada.", "sí.", "no.", "bien.", "claro.", "bueno.",
             "you.", "thank you so much.", "thanks.", "welcome.", "we'll be right back.",
