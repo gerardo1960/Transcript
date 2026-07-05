@@ -430,14 +430,14 @@ async def on_audio_chunk(device_id: int, pcm: np.ndarray) -> None:
         await pipeline.process_audio_chunk(device_id, pcm)
 
 
-def _apply_gain(device, gain_pct: int):
+async def _apply_gain(device, gain_pct: int):
     """Apply gain to a PipeWire device via pactl (best-effort, non-blocking)."""
-    import subprocess
     try:
-        subprocess.run(
-            ["pactl", "set-source-volume", device.pw_node_name, f"{gain_pct}%"],
-            capture_output=True, timeout=3,
+        proc = await asyncio.create_subprocess_exec(
+            "pactl", "set-source-volume", device.pw_node_name, f"{gain_pct}%",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
         )
+        await asyncio.wait_for(proc.wait(), timeout=3)
     except Exception:
         pass
 
@@ -492,7 +492,7 @@ async def startup():
                 buffer_mgr.register_device(dev_id, name)
             # Hardware gain: use L channel value (one physical device)
             name_l = _channel_label(device.bus_path, device.pw_node_name, "L")
-            _apply_gain(device, _ui_config["gains"].get(name_l, DEFAULT_GAIN_PCT))
+            await _apply_gain(device, _ui_config["gains"].get(name_l, DEFAULT_GAIN_PCT))
             await audio_manager.start_capture(device, callback=on_audio_chunk)
         else:
             name = _channel_label(device.bus_path, device.pw_node_name)
@@ -511,7 +511,7 @@ async def startup():
             pipeline.register_speaker(device.id, name)
             pipeline.set_noise_gate(device.id, gate)
             buffer_mgr.register_device(device.id, name)
-            _apply_gain(device, gain)
+            await _apply_gain(device, gain)
             await audio_manager.start_capture(device, callback=on_audio_chunk)
 
     pipeline.buffer_mgr = buffer_mgr
@@ -563,7 +563,11 @@ async def pipewire_watchdog():
                 if consecutive_fused >= FUSE_STRIKES:
                     logger.warning("Restarting PipeWire to fix node fusion...")
                     await audio_manager.stop_all()
-                    subprocess.run(["systemctl", "--user", "restart", "pipewire", "wireplumber"])
+                    proc = await asyncio.create_subprocess_exec(
+                        "systemctl", "--user", "restart", "pipewire", "wireplumber",
+                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await proc.wait()
                     await asyncio.sleep(5)
                     devices = await audio_manager.discover_bluetooth_devices()
                     usb_devices = sorted(
@@ -743,17 +747,17 @@ class NoiseGateRequest(BaseModel):
 @app.post("/api/set_gain")
 async def set_gain(req: GainRequest):
     """Set microphone input gain via PipeWire/pactl."""
-    import subprocess
     device = audio_manager.get_device(req.device_id)
     if not device:
         return {"success": False, "error": "Device not found"}
     gain = max(0, min(100, req.gain_pct))
     try:
-        result = subprocess.run(
-            ["pactl", "set-source-volume", device.pw_node_name, f"{gain}%"],
-            capture_output=True, text=True
+        proc = await asyncio.create_subprocess_exec(
+            "pactl", "set-source-volume", device.pw_node_name, f"{gain}%",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
         )
-        if result.returncode == 0:
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0:
             logger.info(f"Device {req.device_id} gain set to {gain}%")
             if req.device_id in active_speakers:
                 serial = active_speakers[req.device_id]["serial"]
@@ -763,7 +767,7 @@ async def set_gain(req: GainRequest):
                 await broadcast({"type": "ui_config_updated", "data": _ui_config})
             return {"success": True, "gain_pct": gain}
         else:
-            return {"success": False, "error": result.stderr.strip()}
+            return {"success": False, "error": stderr.decode().strip()}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -782,16 +786,17 @@ async def set_noise_gate(req: NoiseGateRequest):
 @app.get("/api/get_gain/{device_id}")
 async def get_gain(device_id: int):
     """Get current microphone gain from PipeWire."""
-    import subprocess, re
+    import re
     device = audio_manager.get_device(device_id)
     if not device:
         return {"success": False, "error": "Device not found"}
     try:
-        result = subprocess.run(
-            ["pactl", "get-source-volume", device.pw_node_name],
-            capture_output=True, text=True
+        proc = await asyncio.create_subprocess_exec(
+            "pactl", "get-source-volume", device.pw_node_name,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         )
-        m = re.search(r'(\d+)%', result.stdout)
+        stdout, _ = await proc.communicate()
+        m = re.search(r'(\d+)%', stdout.decode())
         gain = int(m.group(1)) if m else 100
         return {"success": True, "gain_pct": gain}
     except Exception as e:
