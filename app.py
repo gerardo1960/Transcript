@@ -150,10 +150,10 @@ class CrosstalkSuppressor:
     """
 
     WINDOW_SECS          = 12.0  # history window for committed segments
-    VOLUME_RATIO         = 2.0   # room acoustics give 2–10× gap; 2× catches borderline bleed
+    VOLUME_RATIO         = 2.5   # room acoustics give 2–10× gap; 2.5× avoids suppressing soft new speakers
     SAME_RECEIVER_RATIO  = 1.1   # DJI L/R channels on same receiver: hardware cross-talk ratio ~1.1–1.2×
     OVERLAP_THRESHOLD    = 0.20  # >20 % of weaker mic's content words must match
-    LIVE_ONLY_RATIO      = 3.0   # live-only (no committed words yet) — kept strict
+    LIVE_ONLY_RATIO      = 6.0   # live-only (no committed words yet) — needs large gap to suppress without word check
     SHORT_WORD_LIMIT     = 3     # segments with ≤3 words get the short-bleed check
     NOISE_FLOOR          = 0.005 # no AGC means hardware noise floor is stable and quieter
     SPIKE_RATIO          = 5.0   # linear audio → source/bleed ratio at near-silence is larger
