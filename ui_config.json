@@ -1,18 +1,16 @@
 {
   "saved_names": [
+    "Uchi",
+    "Mirta",
+    "Robert",
     "Yoly",
-    "Marcelo",
-    "Brian",
     "Steven",
     "Ricardo (Abram)",
     "Richard",
-    "Uchi",
     "Abram",
     "Benjamin Paz",
-    "Mirta",
     "Karen",
     "Gerard",
-    "Robert",
     "Sara",
     "Inas",
     "Edward",
@@ -240,6 +238,61 @@
       },
       "font_size": 13,
       "savedAt": 1778222232231
+    },
+    {
+      "name": "Sobrinos2",
+      "devices": {
+        "3L": {
+          "speaker_name": "Uchi",
+          "gain_pct": 100,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "2L": {
+          "speaker_name": "Gerard",
+          "gain_pct": 100,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "1L": {
+          "speaker_name": "Robert",
+          "gain_pct": 100,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "4L": {
+          "speaker_name": "4L",
+          "gain_pct": 100,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "3R": {
+          "speaker_name": "Richard",
+          "gain_pct": 100,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "2R": {
+          "speaker_name": "Karen",
+          "gain_pct": 100,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "1R": {
+          "speaker_name": "Benjamin  Liberman",
+          "gain_pct": 100,
+          "noise_gate": 0.02,
+          "benched": false
+        },
+        "4R": {
+          "speaker_name": "Sara",
+          "gain_pct": 100,
+          "noise_gate": 0.02,
+          "benched": false
+        }
+      },
+      "font_size": 13,
+      "savedAt": 1783199984443
     }
   ],
   "bench": [],
