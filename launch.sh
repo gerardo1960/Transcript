@@ -10,12 +10,13 @@ pkill -f "uvicorn app:app" 2>/dev/null || true
 sleep 1
 
 # Abrir terminal visible con el servidor (exec bash lo mantiene abierto al detener)
+LOOP="while true; do echo '--- Iniciando servidor ---'; bash '$SCRIPT_DIR/start.sh'; echo '--- Servidor detenido, reiniciando en 15s ---'; sleep 15; done"
 if command -v gnome-terminal &>/dev/null; then
-    gnome-terminal --title="Live Transcription Server" -- bash -c "bash '$SCRIPT_DIR/start.sh'; exec bash" &
+    gnome-terminal --title="Live Transcription Server" -- bash -c "$LOOP" &
 elif command -v x-terminal-emulator &>/dev/null; then
-    x-terminal-emulator -T "Live Transcription Server" -e bash -c "bash '$SCRIPT_DIR/start.sh'; exec bash" &
+    x-terminal-emulator -T "Live Transcription Server" -e bash -c "$LOOP" &
 elif command -v xterm &>/dev/null; then
-    xterm -T "Live Transcription Server" -e bash -c "bash '$SCRIPT_DIR/start.sh'; exec bash" &
+    xterm -T "Live Transcription Server" -e bash -c "$LOOP" &
 fi
 
 # Esperar a que el servidor esté listo y abrir el browser
