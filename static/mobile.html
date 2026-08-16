@@ -131,6 +131,9 @@
       font-size: 14px;
       flex-shrink: 0;
       white-space: nowrap;
+      cursor: pointer;
+      text-decoration: underline dotted;
+      text-underline-offset: 3px;
     }
 
     .feed-colon {
@@ -164,6 +167,67 @@
       font-size: 13px;
       opacity: 0.5;
     }
+
+    /* ── Rename modal ── */
+    #rename-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 50;
+    }
+    #rename-overlay.open { display: flex; align-items: flex-end; }
+
+    #rename-sheet {
+      width: 100%;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-radius: 20px 20px 0 0;
+      padding: 20px 20px calc(20px + var(--safe-bottom));
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    #rename-label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    #rename-input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 700;
+      padding: 12px 14px;
+      outline: none;
+      width: 100%;
+    }
+    #rename-input:focus { border-color: var(--accent); }
+
+    #rename-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .rename-btn {
+      flex: 1;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-family: var(--font-ui);
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+    }
+    #rename-cancel { background: var(--border); color: var(--dim); }
+    #rename-confirm { background: var(--accent); color: #000; }
 
     /* ── Auto-scroll button ── */
     #scroll-btn {
@@ -204,6 +268,18 @@
 </div>
 
 <button id="scroll-btn" onclick="scrollToBottom(true)" title="Ir al final">↓</button>
+
+<div id="rename-overlay" onclick="closeRename(event)">
+  <div id="rename-sheet">
+    <div id="rename-label">Nombre de la persona</div>
+    <input id="rename-input" type="text" placeholder="Ej: Eduardo" autocomplete="off"
+           onkeydown="if(event.key==='Enter') confirmRename()" />
+    <div id="rename-actions">
+      <button class="rename-btn" id="rename-cancel" onclick="closeRename()">Cancelar</button>
+      <button class="rename-btn" id="rename-confirm" onclick="confirmRename()">Guardar</button>
+    </div>
+  </div>
+</div>
 
 <script>
   // ── Constants ───────────────────────────────────────────────────────────
@@ -273,26 +349,61 @@
 
   function addSpeaker(sp) {
     if (!speakers[sp.device_id]) {
-      speakers[sp.device_id] = { name: sp.name || 'Speaker', colorIdx: colorSeq++ % 4 };
+      speakers[sp.device_id] = { name: sp.name || 'Speaker', serial: sp.serial || '', colorIdx: colorSeq++ % 4 };
     } else {
       speakers[sp.device_id].name = sp.name;
+      if (sp.serial) speakers[sp.device_id].serial = sp.serial;
     }
     updateCount();
   }
 
   function removeSpeaker(id) {
     delete speakers[id];
-    markSpeaking(id, false);
     updateCount();
   }
 
   function renameSpeaker(id, name) {
     if (speakers[id]) speakers[id].name = name;
-    // Update any existing chip
-    const chip = document.getElementById(`chip-${id}`);
-    if (chip) chip.querySelector('.chip-name').textContent = name;
-    // Update all feed entries for this speaker
     document.querySelectorAll(`[data-dev="${id}"] .feed-name`).forEach(el => el.textContent = name);
+  }
+
+  // ── Rename modal ──────────────────────────────────────────────────────────
+  let _renameDeviceId = null;
+
+  function openRename(deviceId) {
+    _renameDeviceId = deviceId;
+    const sp = speakers[deviceId];
+    const input = document.getElementById('rename-input');
+    // Pre-fill with the person name part if already renamed (after ":")
+    const current = sp ? sp.name : '';
+    const colonIdx = current.indexOf(':');
+    input.value = colonIdx >= 0 ? current.slice(colonIdx + 1) : (current === (sp && sp.serial) ? '' : current);
+    document.getElementById('rename-overlay').classList.add('open');
+    setTimeout(() => input.focus(), 100);
+  }
+
+  function closeRename(e) {
+    if (e && e.target !== document.getElementById('rename-overlay')) return;
+    document.getElementById('rename-overlay').classList.remove('open');
+    _renameDeviceId = null;
+  }
+
+  async function confirmRename() {
+    const input = document.getElementById('rename-input');
+    const personName = input.value.trim();
+    if (!personName || _renameDeviceId === null) { closeRename(); return; }
+    const sp = speakers[_renameDeviceId];
+    const serial = sp ? sp.serial : '';
+    const newName = serial ? `${serial}:${personName}` : personName;
+    document.getElementById('rename-overlay').classList.remove('open');
+    try {
+      await fetch('/api/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_id: _renameDeviceId, new_name: newName }),
+      });
+    } catch(e) { console.error('rename failed', e); }
+    _renameDeviceId = null;
   }
 
   function updateCount() {
@@ -325,7 +436,7 @@
     }
     div.innerHTML =
       `<span class="feed-ts">${ts}</span>` +
-      `<span class="feed-name" style="color:${color}">${esc(name)}</span>` +
+      `<span class="feed-name" style="color:${color}" onclick="openRename(${data.device_id})">${esc(name)}</span>` +
       `<span class="feed-colon">:</span>` +
       `<span class="feed-text">${esc(text)}</span>`;
     feed.appendChild(div);
