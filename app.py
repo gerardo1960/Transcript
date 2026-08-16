@@ -651,6 +651,11 @@ async def serve_ui():
     html_path = Path(__file__).parent / "static" / "index.html"
     return FileResponse(str(html_path))
 
+@app.get("/mobile", response_class=HTMLResponse)
+async def serve_mobile():
+    html_path = Path(__file__).parent / "static" / "mobile.html"
+    return FileResponse(str(html_path))
+
 @app.get("/manual.html", response_class=HTMLResponse)
 async def serve_manual():
     html_path = Path(__file__).parent / "static" / "manual.html"

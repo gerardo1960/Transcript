@@ -1114,6 +1114,10 @@
     }
     #sidebar-overlay.open { display: block; }
   </style>
+  <script>
+    // Auto-redirect phones to the mobile page (tablets ≥ 600px stay on desktop)
+    if (window.innerWidth < 600) location.replace('/mobile');
+  </script>
 </head>
 <body>
 
