@@ -259,7 +259,13 @@
       <div id="status-dot"></div>
       <span id="topbar-title">LIVE <span>TRANSCRIPT</span></span>
     </div>
-    <span id="speaker-count">— speakers</span>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11px;color:var(--dim);font-family:var(--font-mono)">A</span>
+      <input type="range" id="font-slider" min="12" max="24" value="15"
+        style="width:70px;accent-color:var(--accent);cursor:pointer"
+        oninput="changeFontSize(this.value)" />
+      <span style="font-size:17px;color:var(--dim);font-family:var(--font-mono)">A</span>
+    </div>
   </header>
 
   <div id="feed">
@@ -484,7 +490,22 @@
 
   function fmtTime(ts) {
     const d = ts ? new Date(ts * 1000) : new Date();
-    return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  }
+
+  function changeFontSize(size) {
+    size = parseInt(size);
+    document.getElementById('feed').style.fontSize = size + 'px';
+    localStorage.setItem('mobile_font_size', size);
+  }
+
+  // Restore saved font size
+  const savedSize = localStorage.getItem('mobile_font_size');
+  if (savedSize) {
+    document.getElementById('font-slider').value = savedSize;
+    document.getElementById('feed').style.fontSize = savedSize + 'px';
   }
 
   // ── Boot ─────────────────────────────────────────────────────────────────
