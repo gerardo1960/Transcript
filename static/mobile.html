@@ -396,18 +396,21 @@
     _renameDeviceId = null;
   }
 
+  async function fetchSpeakers() {
+    const res = await fetch('/api/speakers');
+    const data = await res.json();
+    return data.speakers;
+  }
+
   async function resetAllNames() {
-    const entries = Object.entries(speakers);
-    for (const [id, sp] of entries) {
-      const serial = sp.serial;
-      if (!serial || sp.name === serial) continue;
-      try {
-        await fetch('/api/rename', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ device_id: parseInt(id), new_name: serial }),
-        });
-      } catch(e) { console.error('reset failed', e); }
+    const list = await fetchSpeakers();
+    for (const sp of list) {
+      if (sp.name === sp.serial) continue;
+      await fetch('/api/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_id: sp.device_id, new_name: sp.serial }),
+      }).catch(e => console.error('reset failed', e));
     }
   }
 
@@ -415,8 +418,10 @@
     const input = document.getElementById('rename-input');
     const personName = input.value.trim();
     if (!personName || _renameDeviceId === null) { closeRename(); return; }
-    const sp = speakers[_renameDeviceId];
-    const serial = sp ? sp.serial : '';
+    // Get serial from server — reliable regardless of local dict state
+    const list = await fetchSpeakers();
+    const serverSp = list.find(s => s.device_id === _renameDeviceId);
+    const serial = serverSp ? serverSp.serial : '';
     const newName = serial ? `${serial}:${personName}` : personName;
     document.getElementById('rename-overlay').classList.remove('open');
     try {
