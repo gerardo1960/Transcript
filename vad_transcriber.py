@@ -26,7 +26,8 @@ MIN_AUDIO_SECS           = 1.5   # minimum audio before considering transcriptio
 PRE_ROLL_SECS            = 0.8
 MIN_ENERGY               = 0.002
 SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~1.8s)
-TAIL_SILENCE_SECS        = 1.2  # tail silence in pending audio → phrase boundary
+TAIL_SILENCE_SECS        = 1.2  # tail silence in normal mode → phrase boundary
+TAIL_SILENCE_INSTANT_SECS = 0.7  # shorter boundary in instant mode (fast worker acts as safety net)
 MAX_WAIT_SECS            = 5.0  # force transcription if no phrase boundary for this long
 MAX_AUDIO_SECS           = 30.0 # cap chunk size sent to Whisper to avoid worker saturation
 WHISPER_TIMEOUT_SECS     = 25   # kill a hung Whisper call after this many seconds
@@ -428,7 +429,8 @@ class VADTranscriptionPipeline:
                     continue
                 if self._handle_silence(device_id, audio, buf):
                     continue
-                tail = audio[-int(TAIL_SILENCE_SECS * SAMPLE_RATE):]
+                tail_secs = TAIL_SILENCE_INSTANT_SECS if self._instant_mode else TAIL_SILENCE_SECS
+                tail = audio[-int(tail_secs * SAMPLE_RATE):]
                 tail_rms = float(np.sqrt(np.mean(tail ** 2)))
                 threshold = self._noise_gate.get(device_id, MIN_ENERGY)
                 at_boundary = tail_rms < threshold
