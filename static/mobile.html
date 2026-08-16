@@ -89,72 +89,6 @@
       border-radius: 20px;
     }
 
-    /* ── Now Speaking section ── */
-    #now-speaking {
-      flex-shrink: 0;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 12px 16px;
-      min-height: 72px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 6px;
-    }
-
-    #now-speaking-label {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      color: var(--dim);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-    }
-
-    #now-speaking-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      min-height: 36px;
-      align-items: center;
-    }
-
-    .speaking-chip {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 14px 6px 8px;
-      border-radius: 999px;
-      border: 2px solid;
-      background: transparent;
-      transition: all 200ms ease;
-    }
-
-    .chip-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: currentColor;
-      animation: pulse 1s ease-in-out infinite;
-      flex-shrink: 0;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50%       { opacity: 0.4; transform: scale(0.75); }
-    }
-
-    .chip-name {
-      font-family: var(--font-display);
-      font-size: 17px;
-      font-weight: 800;
-    }
-
-    #now-speaking-empty {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--muted);
-      font-style: italic;
-    }
-
     /* ── Feed ── */
     #feed {
       flex: 1;
@@ -264,13 +198,6 @@
     <span id="speaker-count">— speakers</span>
   </header>
 
-  <section id="now-speaking">
-    <div id="now-speaking-label">Hablando ahora</div>
-    <div id="now-speaking-chips">
-      <span id="now-speaking-empty">Nadie hablando…</span>
-    </div>
-  </section>
-
   <div id="feed">
     <div class="feed-empty">Esperando voz…</div>
   </div>
@@ -285,8 +212,6 @@
 
   // ── State ───────────────────────────────────────────────────────────────
   const speakers   = {};   // device_id → { name, colorIdx }
-  const speaking   = new Set();  // device_ids currently speaking
-  const speakTimers = {};  // device_id → timeout handle (auto-clear)
   let   colorSeq   = 0;
   let   ws         = null;
   let   reconnectTimer = null;
@@ -295,8 +220,6 @@
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
   const feed       = document.getElementById('feed');
-  const chips      = document.getElementById('now-speaking-chips');
-  const emptyChip  = document.getElementById('now-speaking-empty');
   const scrollBtn  = document.getElementById('scroll-btn');
 
   // ── WebSocket ────────────────────────────────────────────────────────────
@@ -333,20 +256,9 @@
       case 'speaker_added':    addSpeaker(msg.data); break;
       case 'speaker_removed':  removeSpeaker(msg.data.device_id); break;
       case 'speaker_renamed':  renameSpeaker(msg.data.device_id, msg.data.name); break;
-      case 'speaker_active':   markSpeaking(msg.data.device_id, true); break;
-      case 'speaker_inactive': markSpeaking(msg.data.device_id, false); break;
-      case 'transcript':
-        appendMsg(msg.data, false);
-        markSpeaking(msg.data.device_id, true);
-        break;
-      case 'transcript_partial':
-        appendMsg(msg.data, true);
-        markSpeaking(msg.data.device_id, true);
-        break;
-      case 'transcript_update':
-        updateMsg(msg.data);
-        markSpeaking(msg.data.device_id, true);
-        break;
+      case 'transcript':         appendMsg(msg.data, false); break;
+      case 'transcript_partial': appendMsg(msg.data, true);  break;
+      case 'transcript_update':  updateMsg(msg.data);        break;
       case 'transcript_remove':
         removeMsg(msg.data.chunk_id);
         break;
@@ -386,37 +298,6 @@
   function updateCount() {
     document.getElementById('speaker-count').textContent =
       `${Object.keys(speakers).length} speakers`;
-  }
-
-  // ── Speaking state ────────────────────────────────────────────────────────
-  function markSpeaking(id, active) {
-    clearTimeout(speakTimers[id]);
-    if (active) {
-      speaking.add(id);
-      speakTimers[id] = setTimeout(() => markSpeaking(id, false), 3000);
-    } else {
-      speaking.delete(id);
-    }
-    renderChips();
-  }
-
-  function renderChips() {
-    // Remove all chips except the empty placeholder
-    document.querySelectorAll('.speaking-chip').forEach(el => el.remove());
-    emptyChip.style.display = speaking.size > 0 ? 'none' : '';
-
-    speaking.forEach(id => {
-      const sp = speakers[id];
-      if (!sp) return;
-      const color = COLORS[sp.colorIdx];
-      const chip = document.createElement('div');
-      chip.className = 'speaking-chip';
-      chip.id = `chip-${id}`;
-      chip.style.borderColor = color;
-      chip.style.color = color;
-      chip.innerHTML = `<span class="chip-dot"></span><span class="chip-name">${esc(sp.name)}</span>`;
-      chips.appendChild(chip);
-    });
   }
 
   // ── Feed ─────────────────────────────────────────────────────────────────
