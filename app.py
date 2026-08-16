@@ -38,7 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-WHISPER_MODEL = "large-v3"
+WHISPER_MODEL = "large-v3-turbo"
 CUDA_DEVICE   = "cuda"
 COMPUTE_TYPE  = "int8"
 MAX_TRANSCRIPT_HISTORY = 50

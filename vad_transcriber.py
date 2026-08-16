@@ -320,7 +320,7 @@ class VADTranscriptionPipeline:
             await w.load()
         logger.info("All Whisper workers ready")
         logger.info("Loading fast Whisper worker (small/cpu) for Instant mode…")
-        self._fast_worker = WhisperTranscriber("small", "cpu", "int8")
+        self._fast_worker = WhisperTranscriber("small", self.cuda_device, self.compute_type)
         await self._fast_worker.load()
         logger.info("Fast worker ready")
         self._scan_task = asyncio.create_task(self._buffer_scan_loop(), name="buf_scan")
