@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     :root {
+      --fs: 15px;
       --bg:       #0a0c10;
       --surface:  #111418;
       --border:   #1e2330;
@@ -119,16 +120,16 @@
 
     .feed-ts {
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: calc(var(--fs) * 0.67);
       color: var(--dim);
       flex-shrink: 0;
-      min-width: 42px;
+      min-width: 36px;
     }
 
     .feed-name {
       font-family: var(--font-display);
       font-weight: 700;
-      font-size: 14px;
+      font-size: var(--fs);
       flex-shrink: 0;
       white-space: nowrap;
       cursor: pointer;
@@ -138,13 +139,13 @@
 
     .feed-colon {
       color: var(--dim);
-      font-size: 14px;
+      font-size: var(--fs);
       flex-shrink: 0;
     }
 
     .feed-text {
       font-family: var(--font-mono);
-      font-size: 15px;
+      font-size: var(--fs);
       line-height: 1.5;
       flex: 1;
       word-break: break-word;
@@ -153,7 +154,7 @@
 
     /* Most recent message: bigger */
     .feed-msg:last-child .feed-text {
-      font-size: 16px;
+      font-size: calc(var(--fs) * 1.07);
       color: #fff;
     }
 
@@ -259,12 +260,12 @@
       <div id="status-dot"></div>
       <span id="topbar-title">LIVE <span>TRANSCRIPT</span></span>
     </div>
-    <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-size:11px;color:var(--dim);font-family:var(--font-mono)">A</span>
-      <input type="range" id="font-slider" min="12" max="24" value="15"
-        style="width:70px;accent-color:var(--accent);cursor:pointer"
+    <div style="display:flex;align-items:center;gap:8px;flex:1;max-width:200px">
+      <span style="font-size:11px;color:var(--dim);font-family:var(--font-mono);flex-shrink:0">A</span>
+      <input type="range" id="font-slider" min="12" max="26" value="15"
+        style="flex:1;accent-color:var(--accent);cursor:pointer"
         oninput="changeFontSize(this.value)" />
-      <span style="font-size:17px;color:var(--dim);font-family:var(--font-mono)">A</span>
+      <span style="font-size:17px;color:var(--dim);font-family:var(--font-mono);flex-shrink:0">A</span>
     </div>
   </header>
 
@@ -496,8 +497,7 @@
   }
 
   function changeFontSize(size) {
-    size = parseInt(size);
-    document.getElementById('feed').style.fontSize = size + 'px';
+    document.documentElement.style.setProperty('--fs', size + 'px');
     localStorage.setItem('mobile_font_size', size);
   }
 
@@ -505,7 +505,7 @@
   const savedSize = localStorage.getItem('mobile_font_size');
   if (savedSize) {
     document.getElementById('font-slider').value = savedSize;
-    document.getElementById('feed').style.fontSize = savedSize + 'px';
+    document.documentElement.style.setProperty('--fs', savedSize + 'px');
   }
 
   // ── Boot ─────────────────────────────────────────────────────────────────
