@@ -642,6 +642,10 @@ async def hotplug_scanner():
 
 # ── REST Endpoints ────────────────────────────────────────────────────────────
 
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    return Response(content="ok", media_type="text/plain")
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return Response(status_code=204)
