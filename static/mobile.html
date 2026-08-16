@@ -258,7 +258,7 @@
   <header id="topbar">
     <div id="topbar-left">
       <div id="status-dot"></div>
-      <span id="topbar-title">LIVE <span>TRANSCRIPT</span></span>
+      <span id="topbar-title">LIVE TRANSCRIPT</span>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex:1;max-width:200px">
       <span style="font-size:11px;color:var(--dim);font-family:var(--font-mono);flex-shrink:0">A</span>
@@ -267,6 +267,7 @@
         oninput="changeFontSize(this.value)" />
       <span style="font-size:17px;color:var(--dim);font-family:var(--font-mono);flex-shrink:0">A</span>
     </div>
+    <button onclick="resetAllNames()" style="background:var(--border);border:none;color:var(--dim);border-radius:6px;padding:5px 10px;font-size:11px;font-family:var(--font-ui);cursor:pointer;white-space:nowrap;flex-shrink:0">↺ Reset</button>
   </header>
 
   <div id="feed">
@@ -395,16 +396,28 @@
     _renameDeviceId = null;
   }
 
+  async function resetAllNames() {
+    const entries = Object.entries(speakers);
+    for (const [id, sp] of entries) {
+      const serial = sp.serial;
+      if (!serial || sp.name === serial) continue;
+      try {
+        await fetch('/api/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_id: parseInt(id), new_name: serial }),
+        });
+      } catch(e) { console.error('reset failed', e); }
+    }
+  }
+
   async function confirmRename() {
     const input = document.getElementById('rename-input');
     const personName = input.value.trim();
     if (!personName || _renameDeviceId === null) { closeRename(); return; }
     const sp = speakers[_renameDeviceId];
-    const currentName = sp ? sp.name : '';
-    // Extract channel prefix like "2L" or "1R" from current name or serial
-    const match = currentName.match(/^(\d+[LR])/i) || (sp && sp.serial && sp.serial.match(/^(\d+[LR])/i));
-    const prefix = match ? match[1] : (sp ? sp.serial : '');
-    const newName = prefix ? `${prefix}:${personName}` : personName;
+    const serial = sp ? sp.serial : '';
+    const newName = serial ? `${serial}:${personName}` : personName;
     document.getElementById('rename-overlay').classList.remove('open');
     try {
       await fetch('/api/rename', {
