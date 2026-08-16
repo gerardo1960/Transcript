@@ -400,8 +400,11 @@
     const personName = input.value.trim();
     if (!personName || _renameDeviceId === null) { closeRename(); return; }
     const sp = speakers[_renameDeviceId];
-    const serial = sp ? sp.serial : '';
-    const newName = serial ? `${serial}:${personName}` : personName;
+    const currentName = sp ? sp.name : '';
+    // Extract channel prefix like "2L" or "1R" from current name or serial
+    const match = currentName.match(/^(\d+[LR])/i) || (sp && sp.serial && sp.serial.match(/^(\d+[LR])/i));
+    const prefix = match ? match[1] : (sp ? sp.serial : '');
+    const newName = prefix ? `${prefix}:${personName}` : personName;
     document.getElementById('rename-overlay').classList.remove('open');
     try {
       await fetch('/api/rename', {
