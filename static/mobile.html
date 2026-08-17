@@ -436,8 +436,8 @@
   }
 
   function updateCount() {
-    document.getElementById('speaker-count').textContent =
-      `${Object.keys(speakers).length} speakers`;
+    const el = document.getElementById('speaker-count');
+    if (el) el.textContent = `${Object.keys(speakers).length} speakers`;
   }
 
   // ── Feed ─────────────────────────────────────────────────────────────────
