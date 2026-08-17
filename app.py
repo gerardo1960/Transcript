@@ -433,18 +433,14 @@ async def _flush_pending_loop() -> None:
 
             # ── Voice self-identification ─────────────────────────────────
             raw_id = _extract_self_id(seg.text)
-            if raw_id is not None:
+            if raw_id is not None and seg.device_id in active_speakers:
                 canonical = _resolve_alias(raw_id)
                 logger.info(f"[SELF-ID] dev={seg.device_id} raw='{raw_id}' → '{canonical}'")
-                if seg.chunk_id:
-                    await broadcast({"type": "transcript_remove",
-                                     "data": {"chunk_id": seg.chunk_id, "device_id": seg.device_id}})
-                if seg.device_id in active_speakers:
-                    pipeline.update_speaker_name(seg.device_id, canonical)
-                    active_speakers[seg.device_id]["name"] = canonical
-                    await broadcast({"type": "speaker_renamed",
-                                     "data": {"device_id": seg.device_id, "name": canonical}})
-                continue
+                pipeline.update_speaker_name(seg.device_id, canonical)
+                active_speakers[seg.device_id]["name"] = canonical
+                seg.speaker_name = canonical
+                await broadcast({"type": "speaker_renamed",
+                                 "data": {"device_id": seg.device_id, "name": canonical}})
 
             crosstalk.record(seg)
             entry = {
