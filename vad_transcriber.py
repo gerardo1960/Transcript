@@ -641,14 +641,9 @@ class VADTranscriptionPipeline:
     async def _worker_loop(self, worker_idx: int) -> None:
         """Pull large-model work items from the queue and transcribe them."""
         while True:
-            device_id, audio, n_samples, speaker_name, dominant_peer_rms, inherited_chunk_id, enqueue_time = \
+            device_id, audio, n_samples, speaker_name, dominant_peer_rms, inherited_chunk_id, _ = \
                 await self._work_queue.get()
             try:
-                queue_age = time.time() - enqueue_time
-                if queue_age > 8.0:
-                    # Audio spent too long in queue — already outdated, skip inference
-                    logger.warning(f"[LW] dev={device_id} chunk={inherited_chunk_id} → stale in queue ({queue_age:.1f}s), skipping")
-                    continue
                 await self._transcribe_and_emit(
                     audio, n_samples, device_id, speaker_name, worker_idx,
                     dominant_peer_rms, inherited_chunk_id,
