@@ -431,11 +431,28 @@ async def _flush_pending_loop() -> None:
                                      "data": {"chunk_id": seg.chunk_id, "device_id": seg.device_id}})
                 continue
 
+            # ── Unnamed mic low-signal filter ─────────────────────────────
+            sp_info = active_speakers.get(seg.device_id, {})
+            serial  = sp_info.get("serial", "")
+            is_unnamed = (sp_info.get("name", "") == serial)  # name == serial → no one assigned
+            if is_unnamed and serial:
+                gate      = sp_info.get("noise_gate", DEFAULT_NOISE_GATE)
+                threshold = gate * 1.5
+                is_trigger = _extract_self_id(seg.text) is not None
+                if rms_b < threshold and not is_trigger:
+                    logger.info(
+                        f"[UNNAMED-FILTER] suppressed {seg.speaker_name} "
+                        f"rms={rms_b:.4f} < {threshold:.4f}: {seg.text[:60]}"
+                    )
+                    if seg.chunk_id:
+                        await broadcast({"type": "transcript_remove",
+                                         "data": {"chunk_id": seg.chunk_id, "device_id": seg.device_id}})
+                    continue
+
             # ── Voice self-identification ─────────────────────────────────
             raw_id = _extract_self_id(seg.text)
             if raw_id is not None and seg.device_id in active_speakers:
                 canonical = _resolve_alias(raw_id)
-                serial = active_speakers[seg.device_id].get("serial", "")
                 display_name = f"{serial}:{canonical}" if serial else canonical
                 logger.info(f"[SELF-ID] dev={seg.device_id} raw='{raw_id}' → '{display_name}'")
                 pipeline.update_speaker_name(seg.device_id, display_name)
