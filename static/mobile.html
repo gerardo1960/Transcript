@@ -418,12 +418,13 @@
   async function confirmRename() {
     const input = document.getElementById('rename-input');
     const personName = input.value.trim();
-    if (!personName || _renameDeviceId === null) { closeRename(); return; }
+    if (_renameDeviceId === null) { closeRename(); return; }
     // Get serial from server — reliable regardless of local dict state
     const list = await fetchSpeakers();
     const serverSp = list.find(s => s.device_id === _renameDeviceId);
-    const serial = serverSp ? serverSp.serial : '';
-    const newName = serial ? `${serial}:${personName}` : personName;
+    const serial = serverSp ? serverSp.serial : String(_renameDeviceId);
+    // Empty name = reset to serial (e.g. "1L")
+    const newName = personName ? (serial ? `${serial}:${personName}` : personName) : serial;
     document.getElementById('rename-overlay').classList.remove('open');
     try {
       await fetch('/api/rename', {
