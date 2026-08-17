@@ -465,7 +465,11 @@ class VADTranscriptionPipeline:
                 if audio is None or len(audio) < int(MIN_AUDIO_SECS * SAMPLE_RATE):
                     continue
                 if self._handle_silence(device_id, audio, buf):
-                    continue
+                    # If Phase 1 partial is pending and old enough, fall through to Phase 2
+                    # so the gray line gets confirmed or removed instead of stuck forever.
+                    phase1_age_silence = time.time() - self._fast_queued_time.get(device_id, 0)
+                    if device_id not in self._fast_queued_devices or phase1_age_silence < 0.6:
+                        continue
 
                 threshold = self._noise_gate.get(device_id, MIN_ENERGY)
                 force     = (time.time() - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
