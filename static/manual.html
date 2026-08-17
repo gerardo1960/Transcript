@@ -149,7 +149,7 @@
 <div id="lang-es">
 
 <div class="cover">
-  <div class="cover-logo">Manual de Usuario · v2.0</div>
+  <div class="cover-logo">Manual de Usuario · v2.1</div>
   <h1>Live <span>Transcript</span></h1>
   <p class="cover-sub">Sistema de transcripción en tiempo real con múltiples micrófonos inalámbricos</p>
   <div class="cover-pills">
@@ -332,6 +332,21 @@ El punto verde indica conexión activa. Si es <span class="hl3">rojo</span> o gr
   </div>
   <div class="callout tip"><div class="callout-title">Historial de nombres</div>Los nombres usados se guardan automáticamente (hasta 30). Aparecen al editar cualquier micrófono.</div>
   <div class="callout warn"><div class="callout-title">Persistencia</div>Los nombres se guardan en memoria. Al reiniciar el servidor vuelven a "Speaker N". Usa un <strong>perfil</strong> (sección 10) para que persistan.</div>
+
+  <h3>Renombrar por voz</h3>
+  <p>El hablante puede decir su nombre en voz alta y el sistema renombrará el micrófono automáticamente. Funciona en español e inglés:</p>
+  <ul>
+    <li><strong>Español:</strong> "Mi nombre es Eduardo"</li>
+    <li><strong>Inglés:</strong> "My name is Eduardo"</li>
+  </ul>
+  <p>El panel se actualiza al instante con el formato <code>canal:nombre</code>, por ejemplo <code>4R:Eduardo</code>. Esto preserva el identificador de canal de origen incluso después del renombrado automático.</p>
+  <div class="screen">
+    <div class="screen-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span style="margin-left:8px">Ejemplo — renombrado por voz</span></div>
+    <div class="screen-body">  Antes:  [<span class="dim">4R</span>]  <span class="dim">4R</span>          ← micrófono sin nombre
+  Hablante dice: "Mi nombre es Eduardo"
+  Después: [<span class="hl">E</span>]  <span class="hl">4R:Eduardo</span>  ← renombrado automáticamente</div>
+  </div>
+  <div class="callout tip"><div class="callout-title">Cómo funciona</div>La frase entera aparece en pantalla firmada ya con el nuevo nombre, igual que cualquier otra oración transcrita. No se suprime.</div>
 </section>
 
 <section id="es-controles">
@@ -499,6 +514,11 @@ El punto verde indica conexión activa. Si es <span class="hl3">rojo</span> o gr
   <h3>¿Los datos de transcripción se guardan?</h3>
   <ul>
     <li>El historial vive en memoria y se pierde al reiniciar el servidor. Los perfiles persisten en el localStorage del navegador.</li>
+  </ul>
+  <h3>Un micrófono sin nombre no transcribe aunque el hablante esté hablando</h3>
+  <ul>
+    <li>Los micrófonos sin nombre asignado (que muestran solo el identificador de canal como <code>1L</code> o <code>4R</code>) tienen un filtro adicional: si la señal es débil, la transcripción se descarta para evitar captar ruido de fondo o crosstalk.</li>
+    <li>Solución: asignar un nombre al micrófono manualmente (sección 6) o diciendo "Mi nombre es [nombre]", o acercar más el micrófono al hablante.</li>
   </ul>
 </section>
 
@@ -686,7 +706,7 @@ El punto verde indica conexión activa. Si es <span class="hl3">rojo</span> o gr
 </section>
 
 </div><!-- /content apéndices ES -->
-<footer><strong style="color:var(--accent)">Live Transcript</strong> &nbsp;·&nbsp; Manual de Usuario v2.0 &nbsp;·&nbsp; Actualizado el 8 de mayo de 2026</footer>
+<footer><strong style="color:var(--accent)">Live Transcript</strong> &nbsp;·&nbsp; Manual de Usuario v2.1 &nbsp;·&nbsp; Actualizado agosto de 2026</footer>
 </div><!-- #lang-es -->
 
 
@@ -696,7 +716,7 @@ El punto verde indica conexión activa. Si es <span class="hl3">rojo</span> o gr
 <div id="lang-en" style="display:none">
 
 <div class="cover">
-  <div class="cover-logo">User Manual · v2.0</div>
+  <div class="cover-logo">User Manual · v2.1</div>
   <h1>Live <span>Transcript</span></h1>
   <p class="cover-sub">Real-time transcription system with multiple wireless microphones</p>
   <div class="cover-pills">
@@ -879,6 +899,21 @@ Green dot = connected. If <span class="hl3">red</span> or grey, check that app.p
   </div>
   <div class="callout tip"><div class="callout-title">Name history</div>Previously used names are saved automatically (up to 30). They appear when editing any microphone.</div>
   <div class="callout warn"><div class="callout-title">Persistence</div>Names are stored in memory. They reset to "Speaker N" when the server restarts. Use a <strong>profile</strong> (section 10) to make them persist.</div>
+
+  <h3>Voice auto-rename</h3>
+  <p>A speaker can say their name out loud and the system will rename the microphone automatically. Works in Spanish and English:</p>
+  <ul>
+    <li><strong>Spanish:</strong> "Mi nombre es Eduardo"</li>
+    <li><strong>English:</strong> "My name is Eduardo"</li>
+  </ul>
+  <p>The panel updates instantly with the format <code>channel:name</code>, for example <code>4R:Eduardo</code>. This preserves the channel origin even after automatic renaming.</p>
+  <div class="screen">
+    <div class="screen-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span style="margin-left:8px">Example — voice auto-rename</span></div>
+    <div class="screen-body">  Before:  [<span class="dim">4R</span>]  <span class="dim">4R</span>          ← unnamed microphone
+  Speaker says: "My name is Eduardo"
+  After:   [<span class="hl">E</span>]  <span class="hl">4R:Eduardo</span>  ← renamed automatically</div>
+  </div>
+  <div class="callout tip"><div class="callout-title">How it works</div>The full sentence appears on screen signed with the new name, just like any other transcribed line. The phrase is not suppressed.</div>
 </section>
 
 <section id="en-controles">
@@ -1046,6 +1081,11 @@ Green dot = connected. If <span class="hl3">red</span> or grey, check that app.p
   <h3>Are transcription data saved anywhere?</h3>
   <ul>
     <li>The history lives in memory and is lost when the server restarts. Profiles persist in the browser's localStorage.</li>
+  </ul>
+  <h3>An unnamed microphone does not transcribe even though the speaker is talking</h3>
+  <ul>
+    <li>Microphones without an assigned name (showing only the channel label like <code>1L</code> or <code>4R</code>) have an extra signal filter: if the audio level is weak, transcription is discarded to prevent picking up background noise or crosstalk.</li>
+    <li>Fix: assign a name to the microphone manually (section 6) or by saying "My name is [name]", or move the microphone closer to the speaker.</li>
   </ul>
 </section>
 
@@ -1233,7 +1273,7 @@ Green dot = connected. If <span class="hl3">red</span> or grey, check that app.p
 </section>
 
 </div><!-- /content apéndices EN -->
-<footer><strong style="color:var(--accent)">Live Transcript</strong> &nbsp;·&nbsp; User Manual v2.0 &nbsp;·&nbsp; Updated May 8, 2026</footer>
+<footer><strong style="color:var(--accent)">Live Transcript</strong> &nbsp;·&nbsp; User Manual v2.1 &nbsp;·&nbsp; Updated August 2026</footer>
 </div><!-- #lang-en -->
 
 <script>
