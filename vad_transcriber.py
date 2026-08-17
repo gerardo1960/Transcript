@@ -135,10 +135,11 @@ class TranscriptSegment:
 
 
 class WhisperTranscriber:
-    def __init__(self, model_size="large-v3", device="cuda", compute_type="int8"):
+    def __init__(self, model_size="large-v3", device="cuda", compute_type="int8", cpu_threads: int = 0):
         self.model_size   = model_size
         self.device       = device
         self.compute_type = compute_type
+        self._cpu_threads = cpu_threads  # 0 = CTranslate2 default (all cores)
         self.model        = None
         self._stub_mode   = False
         self._busy        = False
@@ -163,13 +164,15 @@ class WhisperTranscriber:
 
     def _load_sync(self):
         from faster_whisper import WhisperModel
-        self.model = WhisperModel(
-            self.model_size,
+        kwargs = dict(
             device=self.device,
             compute_type=self.compute_type,
             num_workers=1,
             download_root="./models",
         )
+        if self._cpu_threads:
+            kwargs["cpu_threads"] = self._cpu_threads
+        self.model = WhisperModel(self.model_size, **kwargs)
 
     async def transcribe(self, audio: np.ndarray) -> Optional[TranscriptSegment]:
         if self._stub_mode:
@@ -414,7 +417,7 @@ class VADTranscriptionPipeline:
             await w.load()
         logger.info("All Whisper workers ready")
         logger.info("Loading fast Whisper worker (small/cpu) for Instant mode…")
-        self._fast_worker = WhisperTranscriber("tiny", "cpu", "int8")
+        self._fast_worker = WhisperTranscriber("tiny", "cpu", "int8", cpu_threads=4)
         await self._fast_worker.load()
         logger.info("Fast worker ready")
         self._scan_task = asyncio.create_task(self._buffer_scan_loop(), name="buf_scan")
