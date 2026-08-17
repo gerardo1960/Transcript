@@ -590,17 +590,6 @@ class VADTranscriptionPipeline:
                     audio = audio[-max_samples:]
                 n_samples = len(audio)
 
-                # Drop P2 if queue is saturated (>= 2× workers) to prevent runaway backlog
-                max_queue = len(self._workers) * 2
-                if self._work_queue.qsize() >= max_queue:
-                    logger.warning(f"[P2] dev={device_id} queue full ({self._work_queue.qsize()}/{max_queue}), dropping chunk")
-                    self._fast_pending_chunk_id.pop(device_id, None)
-                    self._fast_queued_devices.discard(device_id)
-                    self._fast_queued_time.pop(device_id, None)
-                    buf.mark_transcribed(n_full)
-                    self._queued_devices.discard(device_id)
-                    continue
-
                 inherited_chunk_id = self._fast_pending_chunk_id.pop(device_id, None)
                 self._fast_queued_devices.discard(device_id)
                 self._fast_queued_time.pop(device_id, None)
@@ -609,7 +598,7 @@ class VADTranscriptionPipeline:
                 logger.info(f"[P2] dev={device_id} chunk={inherited_chunk_id} audio={n_samples/SAMPLE_RATE:.2f}s at_large={at_large} force={force} fp2={force_phase2}")
                 await self._work_queue.put((
                     device_id, audio, n_samples, speaker,
-                    dominant_peer_rms, inherited_chunk_id,
+                    dominant_peer_rms, inherited_chunk_id, now,
                 ))
 
     async def _fast_worker_loop(self) -> None:
@@ -649,9 +638,14 @@ class VADTranscriptionPipeline:
     async def _worker_loop(self, worker_idx: int) -> None:
         """Pull large-model work items from the queue and transcribe them."""
         while True:
-            device_id, audio, n_samples, speaker_name, dominant_peer_rms, inherited_chunk_id = \
+            device_id, audio, n_samples, speaker_name, dominant_peer_rms, inherited_chunk_id, enqueue_time = \
                 await self._work_queue.get()
             try:
+                queue_age = time.time() - enqueue_time
+                if queue_age > 8.0:
+                    # Audio spent too long in queue — already outdated, skip inference
+                    logger.warning(f"[LW] dev={device_id} chunk={inherited_chunk_id} → stale in queue ({queue_age:.1f}s), skipping")
+                    continue
                 await self._transcribe_and_emit(
                     audio, n_samples, device_id, speaker_name, worker_idx,
                     dominant_peer_rms, inherited_chunk_id,
