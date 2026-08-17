@@ -1376,7 +1376,6 @@
 
     ws.onclose = () => {
       setStatus('disconnected');
-      connected_clients && connected_clients.discard && connected_clients.discard(ws);
       clearTimeout(reconnectTimer);
       reconnectTimer = setTimeout(connect, 2000);
     };
