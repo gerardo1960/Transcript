@@ -590,6 +590,17 @@ class VADTranscriptionPipeline:
                     audio = audio[-max_samples:]
                 n_samples = len(audio)
 
+                # Drop P2 if queue is saturated (>= 2× workers) to prevent runaway backlog
+                max_queue = len(self._workers) * 2
+                if self._work_queue.qsize() >= max_queue:
+                    logger.warning(f"[P2] dev={device_id} queue full ({self._work_queue.qsize()}/{max_queue}), dropping chunk")
+                    self._fast_pending_chunk_id.pop(device_id, None)
+                    self._fast_queued_devices.discard(device_id)
+                    self._fast_queued_time.pop(device_id, None)
+                    buf.mark_transcribed(n_full)
+                    self._queued_devices.discard(device_id)
+                    continue
+
                 inherited_chunk_id = self._fast_pending_chunk_id.pop(device_id, None)
                 self._fast_queued_devices.discard(device_id)
                 self._fast_queued_time.pop(device_id, None)
