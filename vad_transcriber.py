@@ -299,6 +299,12 @@ class VADTranscriptionPipeline:
         self._worker_tasks:   List[asyncio.Task]     = []
         self._scan_task:      Optional[asyncio.Task] = None
 
+        # Fast-path state (instant mode two-phase transcription)
+        self._fast_only_queue:       asyncio.Queue    = asyncio.Queue()
+        self._fast_queued_devices:   set              = set()   # fired fast, large pending
+        self._fast_pending_chunk_id: Dict[int, str]   = {}      # device → chunk_id
+        self._fast_task: Optional[asyncio.Task]       = None
+
         # Per-device state
         self._speaker_names:  Dict[int, str]   = {}
         self._device_active:  Dict[int, bool]  = {}
@@ -334,6 +340,7 @@ class VADTranscriptionPipeline:
         await self._fast_worker.load()
         logger.info("Fast worker ready")
         self._scan_task = asyncio.create_task(self._buffer_scan_loop(), name="buf_scan")
+        self._fast_task = asyncio.create_task(self._fast_worker_loop(), name="fast_worker")
         self._worker_tasks = [
             asyncio.create_task(self._worker_loop(i), name=f"worker_{i}")
             for i in range(self._num_workers)
@@ -342,6 +349,8 @@ class VADTranscriptionPipeline:
     async def shutdown(self) -> None:
         if self._scan_task:
             self._scan_task.cancel()
+        if self._fast_task:
+            self._fast_task.cancel()
         for t in self._worker_tasks:
             t.cancel()
         for w in self._workers:
@@ -361,6 +370,8 @@ class VADTranscriptionPipeline:
 
     def unregister_speaker(self, device_id: int) -> None:
         self._queued_devices.discard(device_id)
+        self._fast_queued_devices.discard(device_id)
+        self._fast_pending_chunk_id.pop(device_id, None)
         for d in (self._speaker_names, self._device_active, self._silence_streak,
                   self._noise_gate, self._last_tx_time, self._live_rms):
             d.pop(device_id, None)
@@ -422,7 +433,13 @@ class VADTranscriptionPipeline:
     # ── Scan loop + worker loops ──────────────────────────────────────────
 
     async def _buffer_scan_loop(self) -> None:
-        """Scan all registered devices every FLUSH_INTERVAL; push ready chunks to queue."""
+        """Scan all registered devices every FLUSH_INTERVAL; push ready chunks to queue.
+
+        In instant mode uses two-phase dispatch:
+          Phase 1 (0.7s silence): fire fast worker only, cursor NOT advanced.
+          Phase 2 (1.2s silence): fire large worker with fuller audio, cursor advanced.
+        The large worker inherits the chunk_id from phase 1 so it updates the same line.
+        """
         while True:
             await asyncio.sleep(FLUSH_INTERVAL)
             if not self.buffer_mgr:
@@ -438,75 +455,103 @@ class VADTranscriptionPipeline:
                     continue
                 if self._handle_silence(device_id, audio, buf):
                     continue
-                tail_secs = TAIL_SILENCE_INSTANT_SECS if self._instant_mode else TAIL_SILENCE_SECS
-                tail = audio[-int(tail_secs * SAMPLE_RATE):]
-                tail_rms = float(np.sqrt(np.mean(tail ** 2)))
+
                 threshold = self._noise_gate.get(device_id, MIN_ENERGY)
-                at_boundary = tail_rms < threshold
-                force = (time.time() - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
-                if not at_boundary and not force:
-                    continue
-                n_full = len(audio)
-                max_samples = int(MAX_AUDIO_SECS * SAMPLE_RATE)
-                if n_full > max_samples:
-                    audio = audio[-max_samples:]  # keep most recent audio (contains speech)
-                n_samples = len(audio)
+                force     = (time.time() - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
+                speaker   = self._speaker_names.get(device_id, f"Speaker {device_id}")
                 dominant_peer_rms = max(
                     (v for k, v in self._live_rms.items() if k != device_id),
                     default=0.0,
                 )
-                buf.mark_transcribed(n_full)   # advance cursor past ALL pending (including discarded prefix)
+
+                # ── Phase 1: fast path at TAIL_SILENCE_INSTANT_SECS (instant mode only) ──
+                if self._instant_mode and device_id not in self._fast_queued_devices:
+                    tail_fast = audio[-int(TAIL_SILENCE_INSTANT_SECS * SAMPLE_RATE):]
+                    at_fast   = float(np.sqrt(np.mean(tail_fast ** 2))) < threshold
+                    if at_fast or force:
+                        chunk_id = uuid.uuid4().hex[:12]
+                        self._fast_queued_devices.add(device_id)
+                        self._fast_pending_chunk_id[device_id] = chunk_id
+                        n_fast = min(len(audio), int(MAX_AUDIO_SECS * SAMPLE_RATE))
+                        await self._fast_only_queue.put((
+                            device_id, audio[-n_fast:], n_fast, speaker,
+                            dominant_peer_rms, chunk_id,
+                        ))
+                        if not force:
+                            continue   # wait for phase 2 before dispatching large worker
+
+                # ── Phase 2: large path at TAIL_SILENCE_SECS (or force) ──────────────
+                tail_large = audio[-int(TAIL_SILENCE_SECS * SAMPLE_RATE):]
+                at_large   = float(np.sqrt(np.mean(tail_large ** 2))) < threshold
+                if not at_large and not force:
+                    continue
+
+                n_full = len(audio)
+                max_samples = int(MAX_AUDIO_SECS * SAMPLE_RATE)
+                if n_full > max_samples:
+                    audio = audio[-max_samples:]
+                n_samples = len(audio)
+
+                inherited_chunk_id = self._fast_pending_chunk_id.pop(device_id, None)
+                self._fast_queued_devices.discard(device_id)
+                buf.mark_transcribed(n_full)
                 self._queued_devices.add(device_id)
                 await self._work_queue.put((
-                    device_id, audio, n_samples,
-                    self._speaker_names.get(device_id, f"Speaker {device_id}"),
-                    dominant_peer_rms,
+                    device_id, audio, n_samples, speaker,
+                    dominant_peer_rms, inherited_chunk_id,
                 ))
 
-    async def _worker_loop(self, worker_idx: int) -> None:
-        """Pull work items from the queue and transcribe them."""
-        whisper = self._workers[worker_idx]
+    async def _fast_worker_loop(self) -> None:
+        """Consume fast-only jobs: run small model, emit partial. Cursor NOT advanced here."""
         while True:
-            device_id, audio, n_samples, speaker_name, dominant_peer_rms = \
+            device_id, audio, n_samples, speaker_name, dominant_peer_rms, chunk_id = \
+                await self._fast_only_queue.get()
+            try:
+                if not self._fast_worker:
+                    continue
+                rms_volume = float(np.sqrt(np.mean(audio[:n_samples] ** 2)))
+                fast_seg = await self._fast_worker.transcribe(audio)
+                if fast_seg and fast_seg.text.strip():
+                    fast_seg.device_id         = device_id
+                    fast_seg.speaker_name      = speaker_name
+                    fast_seg.rms_volume        = rms_volume
+                    fast_seg.dominant_peer_rms = dominant_peer_rms
+                    fast_seg.is_partial        = True
+                    fast_seg.chunk_id          = chunk_id
+                    if self.on_transcript_partial:
+                        try:
+                            await self.on_transcript_partial(fast_seg)
+                        except Exception as e:
+                            logger.error(f"Partial transcript callback error: {e}")
+            except Exception as e:
+                logger.error(f"Fast worker error: {e}")
+            finally:
+                self._fast_only_queue.task_done()
+
+    async def _worker_loop(self, worker_idx: int) -> None:
+        """Pull large-model work items from the queue and transcribe them."""
+        while True:
+            device_id, audio, n_samples, speaker_name, dominant_peer_rms, inherited_chunk_id = \
                 await self._work_queue.get()
             try:
                 await self._transcribe_and_emit(
                     audio, n_samples, device_id, speaker_name, worker_idx,
-                    dominant_peer_rms,
+                    dominant_peer_rms, inherited_chunk_id,
                 )
             finally:
                 self._queued_devices.discard(device_id)
                 self._work_queue.task_done()
 
     async def _transcribe_and_emit(self, audio, n_samples, device_id, speaker_name, worker_idx,
-                                    dominant_peer_rms: float = 0.0):
+                                    dominant_peer_rms: float = 0.0,
+                                    inherited_chunk_id: Optional[str] = None):
+        """Run large Whisper model. In instant mode, fast worker already emitted the partial;
+        inherited_chunk_id links this result to that partial so the UI updates the same line."""
         whisper    = self._workers[worker_idx]
         rms_volume = float(np.sqrt(np.mean(audio[:n_samples] ** 2)))
         logger.info(f"dev={device_id} → Whisper worker={worker_idx} audio={n_samples/SAMPLE_RATE:.2f}s rms={rms_volume:.4f} peer_rms={dominant_peer_rms:.4f}")
 
-        chunk_id       = None
-        partial_emitted = False
-
-        if self._instant_mode and self._fast_worker:
-            chunk_id = uuid.uuid4().hex[:12]
-            fast_seg = await self._fast_worker.transcribe(audio)
-            self._last_tx_time[device_id] = time.time()
-            if fast_seg and fast_seg.text.strip():
-                fast_seg.device_id         = device_id
-                fast_seg.speaker_name      = speaker_name
-                fast_seg.rms_volume        = rms_volume
-                fast_seg.dominant_peer_rms = dominant_peer_rms
-                fast_seg.is_partial        = True
-                fast_seg.chunk_id          = chunk_id
-                if self.on_transcript_partial:
-                    try:
-                        await self.on_transcript_partial(fast_seg)
-                        partial_emitted = True
-                    except Exception as e:
-                        logger.error(f"Partial transcript callback error: {e}")
-
         segment = await whisper.transcribe(audio)
-        # mark_transcribed was already called at queue time in _buffer_scan_loop
         self._last_tx_time[device_id] = time.time()
 
         lang = whisper.last_detected_language
@@ -518,15 +563,15 @@ class VADTranscriptionPipeline:
             segment.speaker_name      = speaker_name
             segment.rms_volume        = rms_volume
             segment.dominant_peer_rms = dominant_peer_rms
-            segment.chunk_id          = chunk_id if partial_emitted else None
+            segment.chunk_id          = inherited_chunk_id  # updates partial if present
             if self.on_transcript:
                 try:
                     await self.on_transcript(segment)
                 except Exception as e:
                     logger.error(f"Transcript callback error: {e}")
-        elif partial_emitted and self.on_transcript_remove:
-            # Large model filtered the audio (hallucination) — clean up the partial
+        elif inherited_chunk_id and self.on_transcript_remove:
+            # Large model filtered hallucination — remove the partial shown by fast worker
             try:
-                await self.on_transcript_remove(chunk_id, device_id)
+                await self.on_transcript_remove(inherited_chunk_id, device_id)
             except Exception as e:
                 logger.error(f"Transcript remove callback error: {e}")
