@@ -28,7 +28,7 @@ MIN_ENERGY               = 0.002
 SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~1.8s)
 TAIL_SILENCE_SECS        = 1.2  # tail silence in normal mode → phrase boundary
 TAIL_SILENCE_INSTANT_SECS = 0.7  # shorter boundary in instant mode (fast worker acts as safety net)
-MAX_WAIT_SECS            = 5.0  # force transcription if no phrase boundary for this long
+MAX_WAIT_SECS            = 10.0 # force transcription if no phrase boundary for this long
 MAX_AUDIO_SECS           = 30.0 # cap chunk size sent to Whisper to avoid worker saturation
 WHISPER_TIMEOUT_SECS     = 25   # kill a hung Whisper call after this many seconds
 LIVE_RMS_DECAY           = 0.993 # per 30 ms chunk → half-life ~3 s
@@ -361,6 +361,9 @@ class VADTranscriptionPipeline:
         except Exception:
             _cfg = {}
         self._num_workers = int(_cfg.get("NUM_WHISPER_PROCESSES", 5))
+        # Optional allowlist: list of serial suffixes (e.g. ["3L"]) to restrict processing.
+        # Empty list or missing key = all devices active.
+        self._active_serials: list = _cfg.get("ACTIVE_SERIALS", [])
 
         self._workers: List[WhisperTranscriber] = [
             WhisperTranscriber(model_size, cuda_device, compute_type)
@@ -521,6 +524,10 @@ class VADTranscriptionPipeline:
             for device_id in list(self._speaker_names.keys()):
                 if device_id in self._queued_devices:
                     continue
+                if self._active_serials:
+                    spk = self._speaker_names.get(device_id, "")
+                    if not any(s in spk for s in self._active_serials):
+                        continue
                 buf = self.buffer_mgr.get_buffer(device_id)
                 if buf is None:
                     continue
