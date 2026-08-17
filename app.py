@@ -175,22 +175,15 @@ async def _announce_registration(canonical_name: str) -> None:
     _last_announce_t = now
     logger.info(f"[ANNOUNCE] iniciando para '{canonical_name}'")
     try:
-        # Subir volumen al 100%
-        r = await (await asyncio.create_subprocess_exec(
-            "wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "1.0",
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
-        )).communicate()
-        logger.info(f"[ANNOUNCE] wpctl ok")
-
-        # Campanillazo — esperar que termine antes del TTS
+        # Campanillazo via paplay (usa el sink PipeWire correcto)
         bell = await asyncio.create_subprocess_exec(
-            "aplay", "-q", _BELL_WAV,
+            "paplay", "--volume=65536", _BELL_WAV,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
         )
         _, bell_err = await bell.communicate()
         logger.info(f"[ANNOUNCE] bell rc={bell.returncode} err={bell_err[:80] if bell_err else b''}")
 
-        # Generar TTS
+        # Generar TTS con piper
         proc = await asyncio.create_subprocess_exec(
             _PIPER_BIN, "--model", _PIPER_MODEL, "--output-raw",
             stdin=asyncio.subprocess.PIPE,
@@ -200,24 +193,14 @@ async def _announce_registration(canonical_name: str) -> None:
         raw, piper_err = await proc.communicate(f"Registrado {canonical_name}".encode())
         logger.info(f"[ANNOUNCE] piper rc={proc.returncode} bytes={len(raw)} err={piper_err[:80] if piper_err else b''}")
 
-        # Amplificar con sox (+6 dB) y reproducir
-        sox = await asyncio.create_subprocess_exec(
-            "sox", "-t", "raw", "-r", "22050", "-e", "signed", "-b", "16", "-c", "1", "-",
-            "-t", "wav", "-", "gain", "6",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        amplified, sox_err = await sox.communicate(raw)
-        logger.info(f"[ANNOUNCE] sox rc={sox.returncode} bytes={len(amplified)} err={sox_err[:80] if sox_err else b''}")
-
-        aplay = await asyncio.create_subprocess_exec(
-            "aplay", "-q",
+        # Reproducir raw PCM via paplay (sink PipeWire, volumen máximo)
+        player = await asyncio.create_subprocess_exec(
+            "paplay", "--raw", "--rate=22050", "--format=s16le", "--channels=1", "--volume=65536",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
         )
-        _, aplay_err = await aplay.communicate(amplified)
-        logger.info(f"[ANNOUNCE] aplay rc={aplay.returncode} err={aplay_err[:80] if aplay_err else b''}")
+        _, play_err = await player.communicate(raw)
+        logger.info(f"[ANNOUNCE] paplay rc={player.returncode} err={play_err[:80] if play_err else b''}")
     except Exception as exc:
         logger.warning(f"[ANNOUNCE] error: {exc}")
 
