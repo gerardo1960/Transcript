@@ -160,11 +160,19 @@ def _resolve_alias(raw_name: str) -> str:
             return canonical
     return raw_name.capitalize()
 
-_BELL_WAV   = "/usr/share/sounds/sound-icons/glass-water-1.wav"
-_PIPER_BIN  = str(Path.home() / ".local/bin/piper")
-_PIPER_MODEL= str(Path.home() / ".local/share/piper-voices/es_AR-daniela-high.onnx")
+_BELL_WAV        = "/usr/share/sounds/sound-icons/glass-water-1.wav"
+_PIPER_BIN       = str(Path.home() / ".local/bin/piper")
+_PIPER_MODEL     = str(Path.home() / ".local/share/piper-voices/es_AR-daniela-high.onnx")
+_last_announce_t : float = 0.0          # cooldown: evitar superposición de anuncios
+_ANNOUNCE_COOLDOWN = 4.0                # segundos mínimos entre anuncios
 
 async def _announce_registration(canonical_name: str) -> None:
+    global _last_announce_t
+    now = time.monotonic()
+    if now - _last_announce_t < _ANNOUNCE_COOLDOWN:
+        logger.info(f"[ANNOUNCE] skipped (cooldown) for '{canonical_name}'")
+        return
+    _last_announce_t = now
     try:
         # Subir volumen al 100%
         await (await asyncio.create_subprocess_exec(

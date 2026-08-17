@@ -238,7 +238,8 @@ class WhisperTranscriber:
             return None
 
         HALLUCINATIONS = {
-            "thank you.", "thanks for watching.", "thanks for watching",
+            "thank you.", "thank you very much.", "thank you very much",
+            "thanks for watching.", "thanks for watching",
             "thank you for watching.", "thank you for watching",
             "okay.", "ok.", "bye.", "bye bye.", "gracias.", "¡gracias!", "gracias!",
             "adiós.", "adios.", "de nada.", "sí.", "no.", "bien.", "claro.", "bueno.",
