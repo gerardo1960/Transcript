@@ -238,6 +238,9 @@ class WhisperTranscriber:
             "thank you for watching.", "thank you for watching",
             "okay.", "ok.", "bye.", "bye bye.", "gracias.", "¡gracias!", "gracias!",
             "adiós.", "adios.", "de nada.", "sí.", "no.", "bien.", "claro.", "bueno.",
+            "chao.", "chao", "ciao.", "ciao",
+            "no, no.", "no, no, no.", "no, no, no, no.", "no no.", "no no no.",
+            "sí, sí.", "sí, sí, sí.", "yes, yes.", "yes, yes, yes.",
             "you.", "thank you so much.", "thanks.", "welcome.", "we'll be right back.",
             "subscribete.", "suscríbete.", "like and subscribe.", "see you next time.",
             "so, bye.", "all right.", "thumbs out.", "alright.", "so bye.",
@@ -297,6 +300,8 @@ class WhisperTranscriber:
             "esta es una conversación en español e inglés.", "esta es una conversación en español e inglés",
             "esta es una conversación en español y inglés.", "esta es una conversación en español y inglés",
             "this is a conversation in english and spanish.", "this is a conversation in english and spanish",
+            # Short farewell/acknowledgment suffixes Whisper appends to real speech
+            " chao.", " chao", " gracias.", " gracias", " adiós.", " adiós", " bye.", " bye",
         ]
         ft_lower = full_text.lower()
         for suffix in HALLUCINATION_SUFFIXES:
