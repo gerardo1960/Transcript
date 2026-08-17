@@ -151,18 +151,19 @@ def _extract_self_id(text: str) -> Optional[str]:
         return None
     return (m.group(1) or m.group(2)).strip()
 
-def _resolve_alias(raw_name: str) -> str:
+def _resolve_alias(raw_name: str) -> tuple[str, bool]:
+    """Returns (canonical_name, was_known_alias). False = unknown name, just capitalized."""
     raw_lower = raw_name.lower()
     for canonical, variants in _ui_config.get("name_aliases", {}).items():
         if raw_lower == canonical.lower():
-            return canonical
+            return canonical, True
         if raw_lower in [v.lower() for v in (variants or [])]:
-            return canonical
-    return raw_name.capitalize()
+            return canonical, True
+    return raw_name.capitalize(), False
 
 _BELL_WAV        = "/usr/share/sounds/sound-icons/glass-water-1.wav"
 _PIPER_BIN       = str(Path.home() / ".local/bin/piper")
-_PIPER_MODEL     = str(Path.home() / ".local/share/piper-voices/es_AR-daniela-high.onnx")
+_PIPER_MODEL_EN  = str(Path.home() / ".local/share/piper-voices/en_US-lessac-high.onnx")
 _last_announce_t : float = 0.0          # cooldown: evitar superposición de anuncios
 _ANNOUNCE_COOLDOWN = 4.0                # segundos mínimos entre anuncios
 
@@ -183,14 +184,14 @@ async def _announce_registration(canonical_name: str) -> None:
         _, bell_err = await bell.communicate()
         logger.info(f"[ANNOUNCE] bell rc={bell.returncode} err={bell_err[:80] if bell_err else b''}")
 
-        # Generar TTS con piper
+        # Generar TTS con piper (voz inglesa, frase "Welcome [nombre]")
         proc = await asyncio.create_subprocess_exec(
-            _PIPER_BIN, "--model", _PIPER_MODEL, "--output-raw",
+            _PIPER_BIN, "--model", _PIPER_MODEL_EN, "--output-raw",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        raw, piper_err = await proc.communicate(f"Registrado {canonical_name}".encode())
+        raw, piper_err = await proc.communicate(f"Welcome, {canonical_name}".encode())
         logger.info(f"[ANNOUNCE] piper rc={proc.returncode} bytes={len(raw)} err={piper_err[:80] if piper_err else b''}")
 
         # Reproducir raw PCM via paplay (sink PipeWire, volumen máximo)
@@ -496,15 +497,16 @@ async def _flush_pending_loop() -> None:
             # ── Voice self-identification ─────────────────────────────────
             raw_id = _extract_self_id(seg.text)
             if raw_id is not None and seg.device_id in active_speakers:
-                canonical = _resolve_alias(raw_id)
+                canonical, known = _resolve_alias(raw_id)
                 display_name = f"{serial}:{canonical}" if serial else canonical
-                logger.info(f"[SELF-ID] dev={seg.device_id} raw='{raw_id}' → '{display_name}'")
+                logger.info(f"[SELF-ID] dev={seg.device_id} raw='{raw_id}' → '{display_name}' known={known}")
                 pipeline.update_speaker_name(seg.device_id, display_name)
                 active_speakers[seg.device_id]["name"] = display_name
                 seg.speaker_name = display_name
                 await broadcast({"type": "speaker_renamed",
                                  "data": {"device_id": seg.device_id, "name": display_name}})
-                asyncio.create_task(_announce_registration(canonical))
+                if known:
+                    asyncio.create_task(_announce_registration(canonical))
 
             crosstalk.record(seg)
             entry = {
