@@ -480,10 +480,12 @@ class VADTranscriptionPipeline:
                 )
 
                 # ── Phase 1: fast path at TAIL_SILENCE_INSTANT_SECS (instant mode only) ──
-                if self._instant_mode and device_id not in self._fast_queued_devices:
+                # Skip Phase 1 when force=True: P1+P2 simultaneous → large model often
+                # finishes first → gray never confirmed.  Force path goes straight to P2.
+                if self._instant_mode and not force and device_id not in self._fast_queued_devices:
                     tail_fast = audio[-int(TAIL_SILENCE_INSTANT_SECS * SAMPLE_RATE):]
                     at_fast   = float(np.sqrt(np.mean(tail_fast ** 2))) < threshold
-                    if at_fast or force:
+                    if at_fast:
                         chunk_id = uuid.uuid4().hex[:12]
                         self._fast_queued_devices.add(device_id)
                         self._fast_pending_chunk_id[device_id] = chunk_id
@@ -494,8 +496,7 @@ class VADTranscriptionPipeline:
                             device_id, audio[-n_fast:], n_fast, speaker,
                             dominant_peer_rms, chunk_id,
                         ))
-                        if not force:
-                            continue   # wait for phase 2 before dispatching large worker
+                        continue   # wait for phase 2 before dispatching large worker
 
                 # ── Phase 2: large path at TAIL_SILENCE_SECS (or force) ──────────────
                 tail_large = audio[-int(TAIL_SILENCE_SECS * SAMPLE_RATE):]
