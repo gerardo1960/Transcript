@@ -1242,6 +1242,7 @@
   const DEVICE_SERIALS = {};      // device_id → serial (stable across reboots)
   let speakerOrder = [];          // ordered device IDs
   let autoScroll = true;
+  let processedChunks = new Set();  // chunk_ids confirmed or removed (prevents stale partials)
   let ws = null;
   let reconnectTimer = null;
   let speakingTimers = {};        // device_id → timeout handle
@@ -1569,7 +1570,15 @@
   }
 
   // ── Transcripts ────────────────────────────────────────────────────────
+  function _trackChunk(chunkId) {
+    if (!chunkId) return;
+    processedChunks.add(chunkId);
+    if (processedChunks.size > 400) processedChunks.delete(processedChunks.values().next().value);
+  }
+
   function appendTranscript(data, animate = true, partial = false) {
+    // Drop late partials for chunk_ids already confirmed or removed
+    if (partial && data.chunk_id && processedChunks.has(data.chunk_id)) return;
     // ── Grid view panel ──
     const area = document.getElementById(`transcript-${data.device_id}`);
     if (area) {
@@ -1622,6 +1631,7 @@
 
   function updateTranscript(data) {
     if (!data.chunk_id) return;
+    _trackChunk(data.chunk_id);
     // Update grid panel entry
     const entry = document.querySelector(`.transcript-entry[data-chunk-id="${data.chunk_id}"]`);
     if (entry) {
@@ -1636,10 +1646,13 @@
       const textEl = feedMsg.querySelector('.feed-text');
       if (textEl) textEl.textContent = data.text;
     }
+    // If neither element exists yet, the update arrived before the partial — show as confirmed
+    if (!entry && !feedMsg) appendTranscript(data, true, false);
   }
 
   function removeTranscript(chunkId) {
     if (!chunkId) return;
+    _trackChunk(chunkId);
     document.querySelectorAll(`[data-chunk-id="${chunkId}"]`).forEach(el => el.remove());
   }
 

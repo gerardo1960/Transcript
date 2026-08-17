@@ -300,7 +300,8 @@
   let   ws         = null;
   let   reconnectTimer = null;
   let   autoScroll = true;
-  let   partials   = {};  // chunk_id → DOM element
+  let   partials        = {};   // chunk_id → DOM element (pending partials)
+  let   processedChunks = new Set();  // chunk_ids confirmed or removed
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
   const feed       = document.getElementById('feed');
@@ -459,6 +460,7 @@
     div.className = 'feed-msg' + (isPartial ? ' partial' : '');
     div.dataset.dev = data.device_id;
     if (data.chunk_id) {
+      if (isPartial && processedChunks.has(data.chunk_id)) return; // already confirmed/removed
       div.dataset.chunk = data.chunk_id;
       partials[data.chunk_id] = div;
     }
@@ -472,11 +474,20 @@
     if (autoScroll) scrollToBottom();
   }
 
+  function _trackProcessed(chunkId) {
+    if (!chunkId) return;
+    processedChunks.add(chunkId);
+    if (processedChunks.size > 300) {
+      processedChunks.delete(processedChunks.values().next().value);
+    }
+  }
+
   function updateMsg(data) {
     const text = (data.text || '').trim();
     if (!text) return;
     const el = data.chunk_id ? partials[data.chunk_id] : null;
-    if (!el) { appendMsg(data, true); return; }
+    if (data.chunk_id) _trackProcessed(data.chunk_id);
+    if (!el) { appendMsg(data, false); return; }  // no partial shown yet — add as confirmed
     el.querySelector('.feed-text').textContent = text;
     if (!data.is_partial) {
       el.classList.remove('partial');
@@ -486,6 +497,7 @@
   }
 
   function removeMsg(chunkId) {
+    _trackProcessed(chunkId);
     const el = partials[chunkId];
     if (el) { el.remove(); delete partials[chunkId]; }
   }
