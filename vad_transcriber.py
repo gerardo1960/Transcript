@@ -80,6 +80,14 @@ def _looks_like_hallucination(text: str) -> bool:
         if top_tri_n >= 3:
             return True
 
+    # ── Pattern 5: character-level repetition within a single token ──
+    # Catches "VTWTWTWTWTWT..." — one long "word" with very few unique characters
+    for word in words:
+        if len(word) >= 8:
+            unique_ratio = len(set(word.lower())) / len(word)
+            if unique_ratio < 0.3:
+                return True
+
     return False
 
 
@@ -165,6 +173,7 @@ class WhisperTranscriber:
             vad_filter=False,
             temperature=0.0,
             no_speech_threshold=0.6,
+            compression_ratio_threshold=1.8,  # descartar texto muy repetitivo (default 2.4)
             condition_on_previous_text=False,
             initial_prompt=" ",
             max_new_tokens=200,   # cap token generation — prevents infinite loops on bad audio
