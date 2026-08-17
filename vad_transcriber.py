@@ -245,6 +245,7 @@ class WhisperTranscriber:
             "adiós.", "adios.", "de nada.", "sí.", "no.", "bien.", "claro.", "bueno.",
             "chao.", "chao", "ciao.", "ciao",
             "chau.", "chau", "chau chau.", "chau, chau.", "chau chau", "chau, chau",
+            "chau, hola.", "chau, hola", "hola, chau.", "hola, chau",
             "no, no.", "no, no, no.", "no, no, no, no.", "no no.", "no no no.",
             "sí, sí.", "sí, sí, sí.", "yes, yes.", "yes, yes, yes.",
             "you.", "thank you so much.", "thanks.", "welcome.", "we'll be right back.",
