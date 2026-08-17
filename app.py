@@ -160,6 +160,34 @@ def _resolve_alias(raw_name: str) -> str:
             return canonical
     return raw_name.capitalize()
 
+_BELL_WAV   = "/usr/share/sounds/sound-icons/glass-water-1.wav"
+_PIPER_BIN  = str(Path.home() / ".local/bin/piper")
+_PIPER_MODEL= str(Path.home() / ".local/share/piper-voices/es_AR-daniela-high.onnx")
+
+async def _announce_registration(canonical_name: str) -> None:
+    try:
+        await asyncio.create_subprocess_exec(
+            "aplay", "-q", _BELL_WAV,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        proc = await asyncio.create_subprocess_exec(
+            _PIPER_BIN, "--model", _PIPER_MODEL, "--output-raw",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        raw, _ = await proc.communicate(f"Registrado {canonical_name}".encode())
+        aplay = await asyncio.create_subprocess_exec(
+            "aplay", "-q", "-r", "22050", "-f", "S16_LE", "-c", "1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await aplay.communicate(raw)
+    except Exception as exc:
+        logger.warning(f"[ANNOUNCE] error: {exc}")
+
 
 # ── Crosstalk / Bleed Suppressor ─────────────────────────────────────────────
 
@@ -460,6 +488,7 @@ async def _flush_pending_loop() -> None:
                 seg.speaker_name = display_name
                 await broadcast({"type": "speaker_renamed",
                                  "data": {"device_id": seg.device_id, "name": display_name}})
+                asyncio.create_task(_announce_registration(canonical))
 
             crosstalk.record(seg)
             entry = {
