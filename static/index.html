@@ -1956,12 +1956,13 @@
   function clearPanelHistory(deviceId) {
     const area = document.getElementById(`transcript-${deviceId}`);
     if (!area) return;
-    const entries = area.querySelectorAll('.transcript-entry');
-    entries.forEach(e => e.remove());
+    area.querySelectorAll('.transcript-entry').forEach(e => e.remove());
     const empty = document.getElementById(`empty-${deviceId}`);
     if (empty) empty.style.display = '';
     const langEl = document.getElementById(`lang-${deviceId}`);
     if (langEl) langEl.textContent = '—';
+    // Also clear this device's entries from the focus-feed (combined view)
+    document.querySelectorAll(`.feed-msg[data-device-id="${deviceId}"]`).forEach(e => e.remove());
     showToast('History cleared');
   }
 
