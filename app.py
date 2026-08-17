@@ -140,8 +140,8 @@ def _sorted_speakers() -> List[dict]:
 # ── Voice self-identification ────────────────────────────────────────────────
 
 _IDENTIFY_RE = re.compile(
-    r'sistema\s+mi\s+nombre\s+es\s+([a-zà-ÿ\w]+)'
-    r'|system\s+my\s+name\s+is\s+([a-zà-ÿ\w]+)',
+    r'sistema[\W]+mi\s+nombre\s+es\s+([a-zà-ÿ\w]+)'
+    r'|system[\W]+my\s+name\s+is\s+([a-zà-ÿ\w]+)',
     re.IGNORECASE,
 )
 
