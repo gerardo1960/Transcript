@@ -166,11 +166,20 @@ _PIPER_MODEL= str(Path.home() / ".local/share/piper-voices/es_AR-daniela-high.on
 
 async def _announce_registration(canonical_name: str) -> None:
     try:
-        await asyncio.create_subprocess_exec(
+        # Subir volumen al 100%
+        await (await asyncio.create_subprocess_exec(
+            "wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "1.0",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )).wait()
+
+        # Campanillazo — esperar que termine antes del TTS
+        bell = await asyncio.create_subprocess_exec(
             "aplay", "-q", _BELL_WAV,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
         )
+        await bell.wait()
+
+        # Generar TTS y amplificar con sox (+6 dB)
         proc = await asyncio.create_subprocess_exec(
             _PIPER_BIN, "--model", _PIPER_MODEL, "--output-raw",
             stdin=asyncio.subprocess.PIPE,
@@ -178,13 +187,22 @@ async def _announce_registration(canonical_name: str) -> None:
             stderr=asyncio.subprocess.DEVNULL,
         )
         raw, _ = await proc.communicate(f"Registrado {canonical_name}".encode())
-        aplay = await asyncio.create_subprocess_exec(
-            "aplay", "-q", "-r", "22050", "-f", "S16_LE", "-c", "1",
+
+        sox = await asyncio.create_subprocess_exec(
+            "sox", "-t", "raw", "-r", "22050", "-e", "signed", "-b", "16", "-c", "1", "-",
+            "-t", "wav", "-", "gain", "6",
             stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        await aplay.communicate(raw)
+        amplified, _ = await sox.communicate(raw)
+
+        aplay = await asyncio.create_subprocess_exec(
+            "aplay", "-q",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await aplay.communicate(amplified)
     except Exception as exc:
         logger.warning(f"[ANNOUNCE] error: {exc}")
 
