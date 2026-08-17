@@ -173,44 +173,51 @@ async def _announce_registration(canonical_name: str) -> None:
         logger.info(f"[ANNOUNCE] skipped (cooldown) for '{canonical_name}'")
         return
     _last_announce_t = now
+    logger.info(f"[ANNOUNCE] iniciando para '{canonical_name}'")
     try:
         # Subir volumen al 100%
-        await (await asyncio.create_subprocess_exec(
+        r = await (await asyncio.create_subprocess_exec(
             "wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "1.0",
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-        )).wait()
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )).communicate()
+        logger.info(f"[ANNOUNCE] wpctl ok")
 
         # Campanillazo — esperar que termine antes del TTS
         bell = await asyncio.create_subprocess_exec(
             "aplay", "-q", _BELL_WAV,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
         )
-        await bell.wait()
+        _, bell_err = await bell.communicate()
+        logger.info(f"[ANNOUNCE] bell rc={bell.returncode} err={bell_err[:80] if bell_err else b''}")
 
-        # Generar TTS y amplificar con sox (+6 dB)
+        # Generar TTS
         proc = await asyncio.create_subprocess_exec(
             _PIPER_BIN, "--model", _PIPER_MODEL, "--output-raw",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
-        raw, _ = await proc.communicate(f"Registrado {canonical_name}".encode())
+        raw, piper_err = await proc.communicate(f"Registrado {canonical_name}".encode())
+        logger.info(f"[ANNOUNCE] piper rc={proc.returncode} bytes={len(raw)} err={piper_err[:80] if piper_err else b''}")
 
+        # Amplificar con sox (+6 dB) y reproducir
         sox = await asyncio.create_subprocess_exec(
             "sox", "-t", "raw", "-r", "22050", "-e", "signed", "-b", "16", "-c", "1", "-",
             "-t", "wav", "-", "gain", "6",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
-        amplified, _ = await sox.communicate(raw)
+        amplified, sox_err = await sox.communicate(raw)
+        logger.info(f"[ANNOUNCE] sox rc={sox.returncode} bytes={len(amplified)} err={sox_err[:80] if sox_err else b''}")
 
         aplay = await asyncio.create_subprocess_exec(
             "aplay", "-q",
             stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
         )
-        await aplay.communicate(amplified)
+        _, aplay_err = await aplay.communicate(amplified)
+        logger.info(f"[ANNOUNCE] aplay rc={aplay.returncode} err={aplay_err[:80] if aplay_err else b''}")
     except Exception as exc:
         logger.warning(f"[ANNOUNCE] error: {exc}")
 
