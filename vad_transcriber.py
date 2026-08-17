@@ -28,7 +28,8 @@ MIN_ENERGY               = 0.002
 SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~1.8s)
 TAIL_SILENCE_SECS        = 1.2  # tail silence in normal mode → phrase boundary
 TAIL_SILENCE_INSTANT_SECS = 0.7  # shorter boundary in instant mode (fast worker acts as safety net)
-MAX_WAIT_SECS            = 10.0 # force transcription if no phrase boundary for this long
+MAX_FAST_WAIT_SECS       = 3.0  # force fast-worker dispatch during continuous speech
+MAX_WAIT_SECS            = 10.0 # force large-worker dispatch if no phrase boundary for this long
 MAX_AUDIO_SECS           = 30.0 # cap chunk size sent to Whisper to avoid worker saturation
 WHISPER_TIMEOUT_SECS     = 25   # kill a hung Whisper call after this many seconds
 LIVE_RMS_DECAY           = 0.993 # per 30 ms chunk → half-life ~3 s
@@ -387,6 +388,7 @@ class VADTranscriptionPipeline:
         self._silence_streak: Dict[int, int]   = {}
         self._noise_gate:     Dict[int, float] = {}
         self._last_tx_time:   Dict[int, float] = {}
+        self._last_fast_time: Dict[int, float] = {}   # last time FW was dispatched (for force_fast)
         self._live_rms:       Dict[int, float] = {}
 
         self._instant_mode = False
@@ -541,9 +543,11 @@ class VADTranscriptionPipeline:
                     if device_id not in self._fast_queued_devices or phase1_age_silence < 0.6:
                         continue
 
-                threshold = self._noise_gate.get(device_id, MIN_ENERGY)
-                force     = (time.time() - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
-                speaker   = self._speaker_names.get(device_id, f"Speaker {device_id}")
+                threshold  = self._noise_gate.get(device_id, MIN_ENERGY)
+                now        = time.time()
+                force      = (now - self._last_tx_time.get(device_id, 0)) > MAX_WAIT_SECS
+                force_fast = (now - self._last_fast_time.get(device_id, 0)) > MAX_FAST_WAIT_SECS
+                speaker    = self._speaker_names.get(device_id, f"Speaker {device_id}")
                 dominant_peer_rms = max(
                     (v for k, v in self._live_rms.items() if k != device_id),
                     default=0.0,
@@ -553,11 +557,12 @@ class VADTranscriptionPipeline:
                 if self._instant_mode and device_id not in self._fast_queued_devices:
                     tail_fast = audio[-int(TAIL_SILENCE_INSTANT_SECS * SAMPLE_RATE):]
                     at_fast   = float(np.sqrt(np.mean(tail_fast ** 2))) < threshold
-                    if at_fast or force:
+                    if at_fast or force or force_fast:
                         chunk_id = uuid.uuid4().hex[:12]
                         self._fast_queued_devices.add(device_id)
                         self._fast_pending_chunk_id[device_id] = chunk_id
-                        self._fast_queued_time[device_id] = time.time()
+                        self._fast_queued_time[device_id] = now
+                        self._last_fast_time[device_id] = now
                         n_fast = min(len(audio), int(MAX_AUDIO_SECS * SAMPLE_RATE))
                         logger.info(f"[P1] dev={device_id} chunk={chunk_id} audio={n_fast/SAMPLE_RATE:.2f}s")
                         await self._fast_only_queue.put((
