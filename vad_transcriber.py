@@ -564,8 +564,7 @@ class VADTranscriptionPipeline:
                             device_id, audio[-n_fast:], n_fast, speaker,
                             dominant_peer_rms, chunk_id,
                         ))
-                        if not force:
-                            continue   # wait for phase 2 before dispatching large worker
+                        continue   # always wait; P2 fires next iteration via force_phase2 or silence
 
                 # ── Phase 2: large path at TAIL_SILENCE_SECS (or force) ──────────────
                 tail_large = audio[-int(TAIL_SILENCE_SECS * SAMPLE_RATE):]
