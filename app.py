@@ -27,12 +27,17 @@ from vad_transcriber import VADTranscriptionPipeline, TranscriptSegment
 from audio_recorder import AudioBufferManager
 
 # ── Logging ───────────────────────────────────────────────────────────────────
+from logging.handlers import RotatingFileHandler
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("server.log", mode="a", encoding="utf-8"),
+        RotatingFileHandler(
+            "server.log", mode="a", encoding="utf-8",
+            maxBytes=10 * 1024 * 1024,  # 10 MB por archivo
+            backupCount=5,              # conserva server.log.1 … server.log.5
+        ),
     ],
 )
 logger = logging.getLogger(__name__)
