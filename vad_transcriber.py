@@ -489,6 +489,7 @@ class VADTranscriptionPipeline:
                         self._fast_pending_chunk_id[device_id] = chunk_id
                         self._fast_queued_time[device_id] = time.time()
                         n_fast = min(len(audio), int(MAX_AUDIO_SECS * SAMPLE_RATE))
+                        logger.info(f"[P1] dev={device_id} chunk={chunk_id} audio={n_fast/SAMPLE_RATE:.2f}s")
                         await self._fast_only_queue.put((
                             device_id, audio[-n_fast:], n_fast, speaker,
                             dominant_peer_rms, chunk_id,
@@ -513,8 +514,10 @@ class VADTranscriptionPipeline:
 
                 inherited_chunk_id = self._fast_pending_chunk_id.pop(device_id, None)
                 self._fast_queued_devices.discard(device_id)
+                self._fast_queued_time.pop(device_id, None)
                 buf.mark_transcribed(n_full)
                 self._queued_devices.add(device_id)
+                logger.info(f"[P2] dev={device_id} chunk={inherited_chunk_id} audio={n_samples/SAMPLE_RATE:.2f}s at_large={at_large} force={force} fp2={force_phase2}")
                 await self._work_queue.put((
                     device_id, audio, n_samples, speaker,
                     dominant_peer_rms, inherited_chunk_id,
@@ -537,11 +540,14 @@ class VADTranscriptionPipeline:
                     fast_seg.dominant_peer_rms = dominant_peer_rms
                     fast_seg.is_partial        = True
                     fast_seg.chunk_id          = chunk_id
+                    logger.info(f"[FW] dev={device_id} chunk={chunk_id} → partial: {repr(fast_seg.text.strip()[:60])}")
                     if self.on_transcript_partial:
                         try:
                             await self.on_transcript_partial(fast_seg)
                         except Exception as e:
                             logger.error(f"Partial transcript callback error: {e}")
+                else:
+                    logger.info(f"[FW] dev={device_id} chunk={chunk_id} → empty/filtered (no partial emitted)")
             except Exception as e:
                 logger.error(f"Fast worker error: {e}")
             finally:
@@ -583,6 +589,7 @@ class VADTranscriptionPipeline:
             segment.rms_volume        = rms_volume
             segment.dominant_peer_rms = dominant_peer_rms
             segment.chunk_id          = inherited_chunk_id  # updates partial if present
+            logger.info(f"[LW] dev={device_id} chunk={inherited_chunk_id} → {'update' if inherited_chunk_id else 'new'}: {repr(segment.text.strip()[:60])}")
             if self.on_transcript:
                 try:
                     await self.on_transcript(segment)
@@ -590,7 +597,10 @@ class VADTranscriptionPipeline:
                     logger.error(f"Transcript callback error: {e}")
         elif inherited_chunk_id and self.on_transcript_remove:
             # Large model filtered hallucination — remove the partial shown by fast worker
+            logger.info(f"[LW] dev={device_id} chunk={inherited_chunk_id} → empty → remove")
             try:
                 await self.on_transcript_remove(inherited_chunk_id, device_id)
             except Exception as e:
                 logger.error(f"Transcript remove callback error: {e}")
+        else:
+            logger.info(f"[LW] dev={device_id} chunk={inherited_chunk_id} → empty, no chunk to remove")
