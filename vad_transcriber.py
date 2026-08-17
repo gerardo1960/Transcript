@@ -97,6 +97,25 @@ def _looks_like_hallucination(text: str) -> bool:
         if top_tri_n >= 3:
             return True
 
+    # ── Pattern 7: word-level repetition in the trailing 8 words ──
+    # Catches "real text prefix ... muñeo y el muñeo y el muñeo" endings
+    if len(words) >= 10:
+        suf_tokens = [re.sub(r"[.,!?;:\-¿¡]", "", w).lower() for w in words[-8:]]
+        suf_counts = Counter(suf_tokens)
+        top_suf, top_suf_n = suf_counts.most_common(1)[0]
+        if top_suf_n >= 3 and top_suf not in _STOPWORDS:
+            return True
+
+    # ── Pattern 4b: 3-gram repetition in the trailing 10 words (threshold 2) ──
+    # Catches "pruebas de las pruebas de las" endings where Pattern 4 needs 3+
+    if len(tokens) >= 12:
+        suf_tri_tokens = tokens[-10:]
+        suf_trigrams = [" ".join(suf_tri_tokens[i:i+3]) for i in range(len(suf_tri_tokens) - 2)]
+        if suf_trigrams:
+            top_stri, top_stri_n = Counter(suf_trigrams).most_common(1)[0]
+            if top_stri_n >= 2 and not all(t in _STOPWORDS for t in top_stri.split()):
+                return True
+
     return False
 
 
@@ -261,6 +280,44 @@ class WhisperTranscriber:
         full_text = " ".join(texts).strip()
         if full_text.lower() in HALLUCINATIONS:
             return None
+
+        # Strip known hallucination phrases appended to otherwise real text
+        # e.g. "Esta es una prueba Gracias por ver el video." → "Esta es una prueba"
+        HALLUCINATION_SUFFIXES = [
+            "gracias por ver el video.", "gracias por ver el video",
+            "¡gracias por ver el video!", "¡gracias por ver!",
+            "gracias por ver.", "gracias por ver",
+            "no olvides suscribirte.", "no olvides suscribirte",
+            "suscríbete al canal.", "suscríbete al canal",
+            "like and subscribe.", "like and subscribe",
+            "thanks for watching.", "thanks for watching",
+            "thank you for watching.", "thank you for watching",
+            "see you next time.", "see you next time",
+            "esta es una conversación en inglés.", "esta es una conversación en inglés",
+            "esta es una conversación en español e inglés.", "esta es una conversación en español e inglés",
+            "esta es una conversación en español y inglés.", "esta es una conversación en español y inglés",
+            "this is a conversation in english and spanish.", "this is a conversation in english and spanish",
+        ]
+        ft_lower = full_text.lower()
+        for suffix in HALLUCINATION_SUFFIXES:
+            if ft_lower.endswith(suffix) and len(full_text) > len(suffix) + 8:
+                full_text = full_text[: len(full_text) - len(suffix)].rstrip(" ,;:.")
+                logger.info(f"Stripped hallucination suffix '{suffix[:30]}': remaining={repr(full_text[:60])}")
+                if not full_text:
+                    return None
+                break
+
+        # Strip Whisper-inserted greeting prefixes (e.g. "Hola, hoy vamos..." → "Hoy vamos...")
+        # Whisper commonly prepends "Hola, " to Spanish chunks that don't start with it
+        HALLUCINATION_PREFIXES = ["hola, ", "oye, "]
+        ft_lower = full_text.lower()
+        for prefix in HALLUCINATION_PREFIXES:
+            if ft_lower.startswith(prefix) and len(full_text) > len(prefix) + 10:
+                full_text = full_text[len(prefix):]
+                full_text = full_text[0].upper() + full_text[1:] if full_text else full_text
+                logger.info(f"Stripped hallucination prefix '{prefix}': remaining={repr(full_text[:60])}")
+                break
+
         if _looks_like_hallucination(full_text):
             logger.info(f"Discarded repetitive hallucination: {repr(full_text[:80])}")
             return None
