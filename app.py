@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Set
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import RedirectResponse
 from fastapi.responses import HTMLResponse, FileResponse, Response
 from pydantic import BaseModel
 
@@ -656,13 +657,17 @@ async def favicon():
     return Response(status_code=204)
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_ui():
-    html_path = Path(__file__).parent / "static" / "index.html"
+async def serve_mobile():
+    html_path = Path(__file__).parent / "static" / "mobile.html"
     return FileResponse(str(html_path))
 
 @app.get("/mobile", response_class=HTMLResponse)
-async def serve_mobile():
-    html_path = Path(__file__).parent / "static" / "mobile.html"
+async def serve_mobile_alias():
+    return RedirectResponse(url="/")
+
+@app.get("/tablet", response_class=HTMLResponse)
+async def serve_tablet():
+    html_path = Path(__file__).parent / "static" / "index.html"
     return FileResponse(str(html_path))
 
 @app.get("/manual.html", response_class=HTMLResponse)

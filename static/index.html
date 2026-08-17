@@ -118,6 +118,19 @@
       transition: all var(--transition);
     }
     #settings-btn:hover { border-color: var(--accent); color: var(--accent); }
+    #mobile-link {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-family: var(--font-ui);
+      font-size: 13px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all var(--transition);
+    }
+    #mobile-link:hover { border-color: var(--accent); color: var(--accent); }
 
     /* Speaker grid */
     #grid {
@@ -1114,10 +1127,6 @@
     }
     #sidebar-overlay.open { display: block; }
   </style>
-  <script>
-    // Auto-redirect phones to the mobile page (tablets ≥ 600px stay on desktop)
-    if (window.innerWidth < 600) location.replace('/mobile');
-  </script>
 </head>
 <body>
 
@@ -1142,6 +1151,7 @@
         <div id="mode-btn-instant" class="mode-btn mode-active" onclick="setMode('instant')">Instant</div>
       </div>
       <button id="view-toggle-btn" onclick="toggleView()">⊞ Focus</button>
+      <a href="/" id="mobile-link" title="Ir a la página móvil">📱 Móvil</a>
       <button id="settings-btn" onclick="openSettings()">⚙ Settings</button>
     </div>
   </header>

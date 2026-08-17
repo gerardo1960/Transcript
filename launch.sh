@@ -26,5 +26,5 @@ for i in $(seq 1 30); do
 done
 
 notify-send "Live Transcription" "¡Listo!" --icon=audio-input-microphone 2>/dev/null || true
-firefox --new-window http://localhost:8000 2>/dev/null || \
-    xdg-open http://localhost:8000 2>/dev/null || true
+firefox --new-window http://localhost:8000/tablet 2>/dev/null || \
+    xdg-open http://localhost:8000/tablet 2>/dev/null || true
