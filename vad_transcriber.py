@@ -605,6 +605,10 @@ class VADTranscriptionPipeline:
             try:
                 if not self._fast_worker:
                     continue
+                # Skip stale jobs: P2 already dispatched for this device (chunk_id no longer pending)
+                if self._fast_pending_chunk_id.get(device_id) != chunk_id:
+                    logger.debug(f"[FW] dev={device_id} chunk={chunk_id} → stale, skipping")
+                    continue
                 rms_volume = float(np.sqrt(np.mean(audio[:n_samples] ** 2)))
                 fast_seg = await self._fast_worker.transcribe(audio)
                 if fast_seg and fast_seg.text.strip():
