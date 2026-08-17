@@ -558,9 +558,9 @@ class VADTranscriptionPipeline:
                     tail_fast = audio[-int(TAIL_SILENCE_INSTANT_SECS * SAMPLE_RATE):]
                     at_fast   = float(np.sqrt(np.mean(tail_fast ** 2))) < threshold
                     rms_full  = float(np.sqrt(np.mean(audio ** 2)))
-                    # force_fast only fires when device has real speech (>3× noise gate),
+                    # force_fast only fires when device has real speech (>1.5× noise gate),
                     # avoiding CPU waste from 8 mics all processing the same weak crosstalk
-                    active_speech = rms_full > threshold * 3
+                    active_speech = rms_full > threshold * 1.5
                     if at_fast or force or (force_fast and active_speech):
                         chunk_id = uuid.uuid4().hex[:12]
                         self._fast_queued_devices.add(device_id)
