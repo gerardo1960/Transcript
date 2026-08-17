@@ -110,7 +110,7 @@ _ui_config: dict = {}
 
 def _load_ui_config() -> None:
     global _ui_config
-    defaults: dict = {"saved_names": [], "profiles": [], "bench": [], "gains": {}, "gates": {}}
+    defaults: dict = {"saved_names": [], "profiles": [], "bench": [], "gains": {}, "gates": {}, "name_aliases": {}}
     try:
         if UI_CONFIG_FILE.exists():
             loaded = json.loads(UI_CONFIG_FILE.read_text(encoding="utf-8"))
@@ -135,6 +135,30 @@ def _sorted_speakers() -> List[dict]:
         m = re.match(r'^(\d+)(.*)', sp.get("serial", sp.get("name", "")))
         return (int(m.group(1)), m.group(2)) if m else (999, "")
     return sorted(active_speakers.values(), key=_key)
+
+
+# ── Voice self-identification ────────────────────────────────────────────────
+
+_IDENTIFY_RE = re.compile(
+    r'micr[oó]fono\s+mi\s+nombre\s+es\s+([a-zà-ÿ\w]+)'
+    r'|microphone\s+my\s+name\s+is\s+([a-zà-ÿ\w]+)',
+    re.IGNORECASE,
+)
+
+def _extract_self_id(text: str) -> Optional[str]:
+    m = _IDENTIFY_RE.search(text)
+    if not m:
+        return None
+    return (m.group(1) or m.group(2)).strip()
+
+def _resolve_alias(raw_name: str) -> str:
+    raw_lower = raw_name.lower()
+    for canonical, variants in _ui_config.get("name_aliases", {}).items():
+        if raw_lower == canonical.lower():
+            return canonical
+        if raw_lower in [v.lower() for v in (variants or [])]:
+            return canonical
+    return raw_name.capitalize()
 
 
 # ── Crosstalk / Bleed Suppressor ─────────────────────────────────────────────
@@ -406,6 +430,22 @@ async def _flush_pending_loop() -> None:
                     await broadcast({"type": "transcript_remove",
                                      "data": {"chunk_id": seg.chunk_id, "device_id": seg.device_id}})
                 continue
+
+            # ── Voice self-identification ─────────────────────────────────
+            raw_id = _extract_self_id(seg.text)
+            if raw_id is not None:
+                canonical = _resolve_alias(raw_id)
+                logger.info(f"[SELF-ID] dev={seg.device_id} raw='{raw_id}' → '{canonical}'")
+                if seg.chunk_id:
+                    await broadcast({"type": "transcript_remove",
+                                     "data": {"chunk_id": seg.chunk_id, "device_id": seg.device_id}})
+                if seg.device_id in active_speakers:
+                    pipeline.update_speaker_name(seg.device_id, canonical)
+                    active_speakers[seg.device_id]["name"] = canonical
+                    await broadcast({"type": "speaker_renamed",
+                                     "data": {"device_id": seg.device_id, "name": canonical}})
+                continue
+
             crosstalk.record(seg)
             entry = {
                 "device_id":    seg.device_id,
@@ -851,6 +891,21 @@ async def patch_ui_config(req: UiConfigPatch):
     if changed:
         _save_ui_config()
         await broadcast({"type": "ui_config_updated", "data": _ui_config})
+    return {"success": True}
+
+
+@app.get("/api/name-aliases")
+async def get_name_aliases():
+    return {"name_aliases": _ui_config.get("name_aliases", {})}
+
+class NameAliasesRequest(BaseModel):
+    name_aliases: Dict[str, List[str]]
+
+@app.post("/api/name-aliases")
+async def set_name_aliases(req: NameAliasesRequest):
+    _ui_config["name_aliases"] = req.name_aliases
+    _save_ui_config()
+    await broadcast({"type": "ui_config_updated", "data": _ui_config})
     return {"success": True}
 
 

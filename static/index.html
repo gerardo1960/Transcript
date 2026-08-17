@@ -1227,6 +1227,28 @@
       </div>
     </div>
 
+    <div>
+      <div class="drawer-section-title">Name Aliases</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;line-height:1.5">
+        Say <em>"micrófono mi nombre es [nombre]"</em> or <em>"microphone my name is [name]"</em> to auto-rename.<br>
+        Add phonetic variants so mis-transcribed names still resolve correctly.
+      </div>
+      <table id="alias-table" style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="color:var(--text-dim);text-align:left">
+            <th style="padding:2px 4px;font-weight:500">Canonical name</th>
+            <th style="padding:2px 4px;font-weight:500">Phonetic variants</th>
+            <th style="width:24px"></th>
+          </tr>
+        </thead>
+        <tbody id="alias-tbody"></tbody>
+      </table>
+      <div style="margin-top:6px;display:flex;gap:6px">
+        <button onclick="addAliasRow()" style="font-size:12px;padding:3px 10px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer">+ Add row</button>
+        <button onclick="saveAliases()" style="font-size:12px;padding:3px 10px;background:var(--accent);border:none;border-radius:4px;color:#fff;cursor:pointer">Save</button>
+      </div>
+    </div>
+
     <button class="drawer-close" onclick="closeSettings()">Close</button>
   </div>
 </div>
@@ -1248,7 +1270,7 @@
   let speakingTimers = {};        // device_id → timeout handle
 
   // ── Centralized UI config ─────────────────────────────────────────────
-  let _uiConfig = { saved_names: [], profiles: [], bench: [], gains: {}, gates: {} };
+  let _uiConfig = { saved_names: [], profiles: [], bench: [], gains: {}, gates: {}, name_aliases: {} };
   let _syncingConfig = false;   // suppress re-saves while applying a remote update
 
   async function patchUiConfig(delta) {
@@ -1269,7 +1291,8 @@
   }
 
   function applyUiConfig(config) {
-    _uiConfig = { saved_names: [], profiles: [], bench: [], gains: {}, gates: {}, ...config };
+    _uiConfig = { saved_names: [], profiles: [], bench: [], gains: {}, gates: {}, name_aliases: {}, ...config };
+    renderAliasTable();
 
     // Rebuild serial → device_id map
     const s2d = {};
@@ -2223,9 +2246,64 @@
     }
   }
 
+  // ── Name Aliases ─────────────────────────────────────────────────────
+  function renderAliasTable() {
+    const tbody = document.getElementById('alias-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const aliases = _uiConfig.name_aliases || {};
+    Object.entries(aliases).forEach(([canonical, variants]) => {
+      _appendAliasRow(tbody, canonical, (variants || []).join(', '));
+    });
+  }
+
+  function _appendAliasRow(tbody, canonical, variants) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding:2px 4px"><input type="text" value="${_esc(canonical)}" placeholder="Name"
+        style="width:100%;background:none;border:1px solid var(--border);border-radius:3px;color:var(--text);padding:2px 4px;font-size:12px"></td>
+      <td style="padding:2px 4px"><input type="text" value="${_esc(variants)}" placeholder="variant1, variant2"
+        style="width:100%;background:none;border:1px solid var(--border);border-radius:3px;color:var(--text);padding:2px 4px;font-size:12px"></td>
+      <td style="padding:2px 2px;text-align:center">
+        <button onclick="this.closest('tr').remove()" title="Remove"
+          style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px;line-height:1">×</button>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+
+  function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+  function addAliasRow() {
+    const tbody = document.getElementById('alias-tbody');
+    if (tbody) _appendAliasRow(tbody, '', '');
+  }
+
+  async function saveAliases() {
+    const tbody = document.getElementById('alias-tbody');
+    if (!tbody) return;
+    const aliases = {};
+    for (const tr of tbody.querySelectorAll('tr')) {
+      const inputs = tr.querySelectorAll('input');
+      const canonical = inputs[0].value.trim();
+      if (!canonical) continue;
+      const variants = inputs[1].value.split(',').map(v => v.trim()).filter(Boolean);
+      aliases[canonical] = variants;
+    }
+    _uiConfig.name_aliases = aliases;
+    try {
+      await fetch('/api/name-aliases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name_aliases: aliases }),
+      });
+      showToast('Aliases saved');
+    } catch (e) { console.error('saveAliases failed', e); }
+  }
+
   function openSettings() {
     loadDeviceList();
     renderProfiles();
+    renderAliasTable();
     document.getElementById('settings-overlay').classList.add('open');
   }
 
