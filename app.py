@@ -435,12 +435,14 @@ async def _flush_pending_loop() -> None:
             raw_id = _extract_self_id(seg.text)
             if raw_id is not None and seg.device_id in active_speakers:
                 canonical = _resolve_alias(raw_id)
-                logger.info(f"[SELF-ID] dev={seg.device_id} raw='{raw_id}' → '{canonical}'")
-                pipeline.update_speaker_name(seg.device_id, canonical)
-                active_speakers[seg.device_id]["name"] = canonical
-                seg.speaker_name = canonical
+                serial = active_speakers[seg.device_id].get("serial", "")
+                display_name = f"{serial}:{canonical}" if serial else canonical
+                logger.info(f"[SELF-ID] dev={seg.device_id} raw='{raw_id}' → '{display_name}'")
+                pipeline.update_speaker_name(seg.device_id, display_name)
+                active_speakers[seg.device_id]["name"] = display_name
+                seg.speaker_name = display_name
                 await broadcast({"type": "speaker_renamed",
-                                 "data": {"device_id": seg.device_id, "name": canonical}})
+                                 "data": {"device_id": seg.device_id, "name": display_name}})
 
             crosstalk.record(seg)
             entry = {
