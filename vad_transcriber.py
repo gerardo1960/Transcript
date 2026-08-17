@@ -303,6 +303,7 @@ class VADTranscriptionPipeline:
         self._fast_only_queue:       asyncio.Queue    = asyncio.Queue()
         self._fast_queued_devices:   set              = set()   # fired fast, large pending
         self._fast_pending_chunk_id: Dict[int, str]   = {}      # device → chunk_id
+        self._fast_queued_time:      Dict[int, float] = {}      # device → when phase 1 fired
         self._fast_task: Optional[asyncio.Task]       = None
 
         # Per-device state
@@ -372,6 +373,7 @@ class VADTranscriptionPipeline:
         self._queued_devices.discard(device_id)
         self._fast_queued_devices.discard(device_id)
         self._fast_pending_chunk_id.pop(device_id, None)
+        self._fast_queued_time.pop(device_id, None)
         for d in (self._speaker_names, self._device_active, self._silence_streak,
                   self._noise_gate, self._last_tx_time, self._live_rms):
             d.pop(device_id, None)
@@ -472,6 +474,7 @@ class VADTranscriptionPipeline:
                         chunk_id = uuid.uuid4().hex[:12]
                         self._fast_queued_devices.add(device_id)
                         self._fast_pending_chunk_id[device_id] = chunk_id
+                        self._fast_queued_time[device_id] = time.time()
                         n_fast = min(len(audio), int(MAX_AUDIO_SECS * SAMPLE_RATE))
                         await self._fast_only_queue.put((
                             device_id, audio[-n_fast:], n_fast, speaker,
@@ -483,7 +486,10 @@ class VADTranscriptionPipeline:
                 # ── Phase 2: large path at TAIL_SILENCE_SECS (or force) ──────────────
                 tail_large = audio[-int(TAIL_SILENCE_SECS * SAMPLE_RATE):]
                 at_large   = float(np.sqrt(np.mean(tail_large ** 2))) < threshold
-                if not at_large and not force:
+                # Also fire if fast worker fired ≥0.6s ago (catches continuous speech)
+                phase1_age = time.time() - self._fast_queued_time.get(device_id, 0)
+                force_phase2 = device_id in self._fast_queued_devices and phase1_age >= 0.6
+                if not at_large and not force and not force_phase2:
                     continue
 
                 n_full = len(audio)
