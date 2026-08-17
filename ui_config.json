@@ -308,19 +308,32 @@
     "4R": 0.02
   },
   "name_aliases": {
+    "Gerard": [
+      "Gerard",
+      "Gerardo",
+      "Gerald",
+      "Gerar",
+      "Gerart"
+    ],
     "Eduardo": [
       "Edward",
       "Eduardo"
     ],
     "Uchi": [
       "Uchi",
-      "Uchia",
+      "Uchita",
       "Yona",
       "Uchiha",
       "Xuxi",
       "Xochitl",
       "Sushi",
-      "Suchi"
+      "Suchi",
+      "Sona",
+      "Jona",
+      "Suana",
+      "Sona",
+      "Zona",
+      "Jona"
     ],
     "Mirta": [
       "Mita",
@@ -366,6 +379,12 @@
       "An Age",
       "An Ace",
       "Anees"
+    ],
+    "Gerard": [
+      "Gerardo",
+      "Cedaro",
+      "Herardo",
+      "Gerard"
     ]
   }
 }
