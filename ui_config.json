@@ -306,5 +306,66 @@
     "2R": 0.02,
     "1R": 0.02,
     "4R": 0.02
+  },
+  "name_aliases": {
+    "Eduardo": [
+      "Edward",
+      "Eduardo"
+    ],
+    "Uchi": [
+      "Uchi",
+      "Uchia",
+      "Yona",
+      "Uchiha",
+      "Xuxi",
+      "Xochitl",
+      "Sushi",
+      "Suchi"
+    ],
+    "Mirta": [
+      "Mita",
+      "Mirta",
+      "Mirka"
+    ],
+    "Marcelo": [
+      "Marcela",
+      "Marcelo",
+      "Marcella",
+      "Marcy",
+      "Marcilo",
+      "Marcello",
+      "Marcia"
+    ],
+    "Yoli": [
+      "Yoli",
+      "Jolie",
+      "Soli",
+      "Jollie",
+      "Oli",
+      "Sol"
+    ],
+    "Steven": [
+      "Stephen",
+      "Steven"
+    ],
+    "Alyssa": [
+      "Alyssa"
+    ],
+    "Sara": [
+      "Sarah",
+      "Sara",
+      "Sue"
+    ],
+    "Inas": [
+      "Inez",
+      "A",
+      "Ines",
+      "In",
+      "Anais",
+      "A's",
+      "An Age",
+      "An Ace",
+      "Anees"
+    ]
   }
 }
