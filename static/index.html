@@ -2086,6 +2086,7 @@
         body: JSON.stringify({device_id: deviceId, new_name: defaultName}),
       });
     } catch(e) { console.error('Reset failed', e); }
+    clearPanelHistory(deviceId);
   }
 
   // ── Rename ─────────────────────────────────────────────────────────────
