@@ -46,6 +46,25 @@ _STOPWORDS = {
 
 def _looks_like_hallucination(text: str) -> bool:
     """Catch repetitive / counting hallucinations that Whisper produces on near-silent audio."""
+    words = text.split()
+
+    # ── Pattern 5: character-level repetition within a single token ──
+    # Catches "VTWTWTWTWTWT..." — one long "word" with very few unique characters
+    # Must run BEFORE the short-text early-return below.
+    for word in words:
+        if len(word) >= 8:
+            unique_ratio = len(set(word.lower())) / len(word)
+            if unique_ratio < 0.3:
+                return True
+
+    # ── Pattern 6: entire text dominated by a single repeated character ──
+    # Catches "______..." and "ギギギギギギギ" regardless of word count.
+    non_space = text.replace(" ", "")
+    if len(non_space) >= 8:
+        top_char, top_n = Counter(non_space).most_common(1)[0]
+        if top_n / len(non_space) > 0.7:
+            return True
+
     # ── Pattern 1: dot-chained repetition without spaces ("I...I...I..." or "You.You.You.") ──
     punct_tokens = [t.strip() for t in re.split(r'[.\s]+', text) if t.strip()]
     if len(punct_tokens) >= 6:
@@ -55,13 +74,11 @@ def _looks_like_hallucination(text: str) -> bool:
             return True
 
     # ── Pattern 2: word-level repetition ──
-    words = text.split()
     if len(words) < 8:          # short phrases repeat naturally in Spanish
         return False
     tokens = [re.sub(r"[.,!?;:\-¿¡]", "", w).lower() for w in words]
     counts = Counter(tokens)
     top_word, top_count = counts.most_common(1)[0]
-    # Require at least 3 occurrences AND the word is not a stopword
     if top_count >= 3 and top_word not in _STOPWORDS and top_count / len(tokens) > 0.40:
         return True
 
@@ -79,14 +96,6 @@ def _looks_like_hallucination(text: str) -> bool:
         top_tri, top_tri_n = Counter(trigrams).most_common(1)[0]
         if top_tri_n >= 3:
             return True
-
-    # ── Pattern 5: character-level repetition within a single token ──
-    # Catches "VTWTWTWTWTWT..." — one long "word" with very few unique characters
-    for word in words:
-        if len(word) >= 8:
-            unique_ratio = len(set(word.lower())) / len(word)
-            if unique_ratio < 0.3:
-                return True
 
     return False
 
