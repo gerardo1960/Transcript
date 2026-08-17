@@ -301,7 +301,8 @@ class WhisperTranscriber:
             "esta es una conversación en español y inglés.", "esta es una conversación en español y inglés",
             "this is a conversation in english and spanish.", "this is a conversation in english and spanish",
             # Short farewell/acknowledgment suffixes Whisper appends to real speech
-            " chao.", " chao", " gracias.", " gracias", " adiós.", " adiós", " bye.", " bye",
+            " chao.", " chao", " gracias.", " gracias", " ¡gracias!", " gracias!",
+            " adiós.", " adiós", " bye.", " bye",
         ]
         ft_lower = full_text.lower()
         for suffix in HALLUCINATION_SUFFIXES:
