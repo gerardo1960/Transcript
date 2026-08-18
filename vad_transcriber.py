@@ -135,12 +135,15 @@ class TranscriptSegment:
 
 
 class WhisperTranscriber:
-    def __init__(self, model_size="large-v3", device="cuda", compute_type="int8", cpu_threads: int = 0):
-        self.model_size   = model_size
-        self.device       = device
-        self.compute_type = compute_type
-        self._cpu_threads = cpu_threads  # 0 = CTranslate2 default (all cores)
-        self.model        = None
+    def __init__(self, model_size="large-v3", device="cuda", compute_type="int8", cpu_threads: int = 0,
+                 beam_size: int = 5, without_timestamps: bool = False):
+        self.model_size          = model_size
+        self.device              = device
+        self.compute_type        = compute_type
+        self._cpu_threads        = cpu_threads  # 0 = CTranslate2 default (all cores)
+        self._beam_size          = beam_size
+        self._without_timestamps = without_timestamps
+        self.model               = None
         self._stub_mode   = False
         self._busy        = False
         self._executor    = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper")
@@ -201,7 +204,8 @@ class WhisperTranscriber:
         segments, info = self.model.transcribe(
             audio,
             task="transcribe",
-            beam_size=5,
+            beam_size=self._beam_size,
+            without_timestamps=self._without_timestamps,
             vad_filter=False,
             temperature=0.0,
             no_speech_threshold=0.6,
@@ -421,7 +425,7 @@ class VADTranscriptionPipeline:
             await w.load()
         logger.info("All Whisper workers ready")
         logger.info("Loading fast Whisper worker (small/cpu) for Instant mode…")
-        self._fast_worker = WhisperTranscriber("tiny", "cpu", "int8", cpu_threads=4)
+        self._fast_worker = WhisperTranscriber("tiny", "cuda", "int8", beam_size=1, without_timestamps=True)
         await self._fast_worker.load()
         logger.info("Fast worker ready")
         self._scan_task = asyncio.create_task(self._buffer_scan_loop(), name="buf_scan")
