@@ -166,6 +166,8 @@ _PIPER_BIN       = str(Path.home() / ".local/bin/piper")
 _PIPER_MODEL_EN  = str(Path.home() / ".local/share/piper-voices/en_US-lessac-high.onnx")
 _last_announce_t : float = 0.0          # cooldown: evitar superposición de anuncios
 _ANNOUNCE_COOLDOWN = 4.0                # segundos mínimos entre anuncios
+_tts_muted_until  : float = 0.0        # ventana de inmunidad post-TTS (filtra bleed del parlante)
+_TTS_MUTE_WINDOW  = 5.0                # segundos a suprimir segmentos de bajo RMS tras el anuncio
 
 async def _announce_registration(canonical_name: str, say_name: bool = True) -> None:
     global _last_announce_t
@@ -174,6 +176,8 @@ async def _announce_registration(canonical_name: str, say_name: bool = True) -> 
         logger.info(f"[ANNOUNCE] skipped (cooldown) for '{canonical_name}'")
         return
     _last_announce_t = now
+    global _tts_muted_until
+    _tts_muted_until = now + _TTS_MUTE_WINDOW
     logger.info(f"[ANNOUNCE] iniciando para '{canonical_name}' say_name={say_name}")
     try:
         # Campanillazo — siempre suena
@@ -469,6 +473,14 @@ async def _flush_pending_loop() -> None:
                     f"[CROSSTALK-{label}] suppressed {seg.speaker_name} "
                     f"rms={rms_b:.4f}: {seg.text[:60]}"
                 )
+                if seg.chunk_id:
+                    await broadcast({"type": "transcript_remove",
+                                     "data": {"chunk_id": seg.chunk_id, "device_id": seg.device_id}})
+                continue
+
+            # ── Post-TTS immunity: filtra bleed del parlante ─────────────
+            if time.monotonic() < _tts_muted_until and rms_b < 0.030:
+                logger.info(f"[TTS-MUTE] suppressed {seg.speaker_name} rms={rms_b:.4f}: {seg.text[:60]}")
                 if seg.chunk_id:
                     await broadcast({"type": "transcript_remove",
                                      "data": {"chunk_id": seg.chunk_id, "device_id": seg.device_id}})
