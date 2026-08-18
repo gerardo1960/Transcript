@@ -167,41 +167,39 @@ _PIPER_MODEL_EN  = str(Path.home() / ".local/share/piper-voices/en_US-lessac-hig
 _last_announce_t : float = 0.0          # cooldown: evitar superposición de anuncios
 _ANNOUNCE_COOLDOWN = 4.0                # segundos mínimos entre anuncios
 
-async def _announce_registration(canonical_name: str) -> None:
+async def _announce_registration(canonical_name: str, say_name: bool = True) -> None:
     global _last_announce_t
     now = time.monotonic()
     if now - _last_announce_t < _ANNOUNCE_COOLDOWN:
         logger.info(f"[ANNOUNCE] skipped (cooldown) for '{canonical_name}'")
         return
     _last_announce_t = now
-    logger.info(f"[ANNOUNCE] iniciando para '{canonical_name}'")
+    logger.info(f"[ANNOUNCE] iniciando para '{canonical_name}' say_name={say_name}")
     try:
-        # Campanillazo via paplay (usa el sink PipeWire correcto)
+        # Campanillazo — siempre suena
         bell = await asyncio.create_subprocess_exec(
             "paplay", "--volume=65536", _BELL_WAV,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
         )
         _, bell_err = await bell.communicate()
-        logger.info(f"[ANNOUNCE] bell rc={bell.returncode} err={bell_err[:80] if bell_err else b''}")
+        logger.info(f"[ANNOUNCE] bell rc={bell.returncode}")
 
-        # Generar TTS con piper (voz inglesa, frase "Welcome [nombre]")
-        proc = await asyncio.create_subprocess_exec(
-            _PIPER_BIN, "--model", _PIPER_MODEL_EN, "--output-raw",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        raw, piper_err = await proc.communicate(f"Welcome, {canonical_name}".encode())
-        logger.info(f"[ANNOUNCE] piper rc={proc.returncode} bytes={len(raw)} err={piper_err[:80] if piper_err else b''}")
-
-        # Reproducir raw PCM via paplay (sink PipeWire, volumen máximo)
-        player = await asyncio.create_subprocess_exec(
-            "paplay", "--raw", "--rate=22050", "--format=s16le", "--channels=1", "--volume=65536",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
-        )
-        _, play_err = await player.communicate(raw)
-        logger.info(f"[ANNOUNCE] paplay rc={player.returncode} err={play_err[:80] if play_err else b''}")
+        # TTS "Welcome [nombre]" — solo si el nombre está en la lista de aliases
+        if say_name:
+            proc = await asyncio.create_subprocess_exec(
+                _PIPER_BIN, "--model", _PIPER_MODEL_EN, "--output-raw",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            raw, _ = await proc.communicate(f"Welcome, {canonical_name}".encode())
+            player = await asyncio.create_subprocess_exec(
+                "paplay", "--raw", "--rate=22050", "--format=s16le", "--channels=1", "--volume=65536",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            )
+            _, play_err = await player.communicate(raw)
+            logger.info(f"[ANNOUNCE] paplay rc={player.returncode}")
     except Exception as exc:
         logger.warning(f"[ANNOUNCE] error: {exc}")
 
@@ -505,8 +503,7 @@ async def _flush_pending_loop() -> None:
                 seg.speaker_name = display_name
                 await broadcast({"type": "speaker_renamed",
                                  "data": {"device_id": seg.device_id, "name": display_name}})
-                if known:
-                    asyncio.create_task(_announce_registration(canonical))
+                asyncio.create_task(_announce_registration(canonical, known))
 
             crosstalk.record(seg)
             entry = {
