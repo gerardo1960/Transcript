@@ -211,7 +211,7 @@ class WhisperTranscriber:
             no_speech_threshold=0.6,
             compression_ratio_threshold=1.8,  # descartar texto muy repetitivo (default 2.4)
             condition_on_previous_text=False,
-            initial_prompt="Conversación en español e inglés entre varias personas.",
+            initial_prompt=" ",
             max_new_tokens=200,   # cap token generation — prevents infinite loops on bad audio
         )
 
