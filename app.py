@@ -492,7 +492,7 @@ async def _flush_pending_loop() -> None:
             is_unnamed = (sp_info.get("name", "") == serial)  # name == serial → no one assigned
             if is_unnamed and serial:
                 gate      = sp_info.get("noise_gate", DEFAULT_NOISE_GATE)
-                threshold = gate * 1.5
+                threshold = gate * 2.5
                 is_trigger = _extract_self_id(seg.text) is not None
                 if rms_b < threshold and not is_trigger:
                     logger.info(
