@@ -569,7 +569,10 @@
 
   function updateCount() {
     const el = document.getElementById('speaker-count');
-    if (el) el.textContent = `${Object.keys(speakers).length} speakers`;
+    if (!el) return;
+    const mics = Object.keys(speakers).length;
+    const named = Object.values(speakers).filter(sp => sp.name && sp.name !== sp.serial && !sp.name.endsWith(':') && sp.name !== '').length;
+    el.innerHTML = `🎙${mics}&nbsp;&nbsp;<span style="color:var(--accent)"><svg width="11" height="11" viewBox="0 0 10 10" fill="currentColor" style="vertical-align:middle;margin-right:1px"><circle cx="5" cy="3" r="2"/><path d="M1 9.5c0-2.2 1.8-4 4-4s4 1.8 4 4"/></svg>${named}</span>`;
   }
 
   // ── Feed ─────────────────────────────────────────────────────────────────
