@@ -454,6 +454,7 @@
 
   // ── Speakers ─────────────────────────────────────────────────────────────
   function initSpeakers(list) {
+    Object.keys(speakers).forEach(k => delete speakers[k]);
     list.forEach(sp => addSpeaker(sp));
     updateCount();
   }
