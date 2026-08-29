@@ -582,7 +582,7 @@ class VADTranscriptionPipeline:
                         logger.info(f"[P1] dev={device_id} chunk={chunk_id} audio={n_fast/SAMPLE_RATE:.2f}s")
                         await self._fast_only_queue.put((
                             device_id, audio[-n_fast:], n_fast, speaker,
-                            dominant_peer_rms, chunk_id,
+                            dominant_peer_rms, chunk_id, now,
                         ))
                         continue   # always wait; P2 fires next iteration via force_phase2 or silence
 
@@ -615,10 +615,14 @@ class VADTranscriptionPipeline:
     async def _fast_worker_loop(self) -> None:
         """Consume fast-only jobs: run small model, emit partial. Cursor NOT advanced here."""
         while True:
-            device_id, audio, n_samples, speaker_name, dominant_peer_rms, chunk_id = \
+            device_id, audio, n_samples, speaker_name, dominant_peer_rms, chunk_id, queued_at = \
                 await self._fast_only_queue.get()
             try:
                 if not self._fast_worker:
+                    continue
+                # Drop stale partial jobs — no point showing gray text from 4+ seconds ago
+                if time.time() - queued_at > 4.0:
+                    logger.warning(f"[FW] dev={device_id} chunk={chunk_id} — DROPPED stale partial")
                     continue
                 # Skip stale jobs: P2 already dispatched for this device (chunk_id no longer pending)
                 if self._fast_pending_chunk_id.get(device_id) != chunk_id:
@@ -649,9 +653,16 @@ class VADTranscriptionPipeline:
     async def _worker_loop(self, worker_idx: int) -> None:
         """Pull large-model work items from the queue and transcribe them."""
         while True:
-            device_id, audio, n_samples, speaker_name, dominant_peer_rms, inherited_chunk_id, _ = \
+            device_id, audio, n_samples, speaker_name, dominant_peer_rms, inherited_chunk_id, queued_at = \
                 await self._work_queue.get()
             try:
+                age = time.time() - queued_at
+                if age > 4.0:
+                    # Job is stale — queue fell behind. Drop it to catch up.
+                    logger.warning(f"[LW] dev={device_id} chunk={inherited_chunk_id} age={age:.1f}s — DROPPED stale job")
+                    if inherited_chunk_id and self.on_transcript_remove:
+                        await self.on_transcript_remove(inherited_chunk_id, device_id)
+                    continue
                 await self._transcribe_and_emit(
                     audio, n_samples, device_id, speaker_name, worker_idx,
                     dominant_peer_rms, inherited_chunk_id,
