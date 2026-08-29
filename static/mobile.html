@@ -588,8 +588,13 @@
     const empty = feed.querySelector('.feed-empty');
     if (empty) empty.remove();
 
-    // Trim to MAX_MSGS
-    while (feed.children.length >= MAX_MSGS) feed.removeChild(feed.firstChild);
+    // Trim to MAX_MSGS — clean up partials ref so pruned nodes can be GC'd
+    while (feed.children.length >= MAX_MSGS) {
+      const removed = feed.firstChild;
+      const cid = removed && removed.dataset && removed.dataset.chunk;
+      if (cid && partials[cid] === removed) delete partials[cid];
+      feed.removeChild(removed);
+    }
 
     const div = document.createElement('div');
     div.className = 'feed-msg' + (isPartial ? ' partial' : '');
