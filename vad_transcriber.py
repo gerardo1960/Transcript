@@ -21,13 +21,13 @@ from audio_recorder import AudioBufferManager
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE              = 16000
-FLUSH_INTERVAL           = 0.3
+FLUSH_INTERVAL           = 0.15  # was 0.3 — faster scan reduces per-event latency
 MIN_AUDIO_SECS           = 1.5   # minimum audio before considering transcription
 PRE_ROLL_SECS            = 0.8
 MIN_ENERGY               = 0.002
 SILENCE_ADVANCE_AFTER    = 6    # consecutive silent ticks before advancing cursor (~1.8s)
-TAIL_SILENCE_SECS        = 1.2  # tail silence in normal mode → phrase boundary
-TAIL_SILENCE_INSTANT_SECS = 0.7  # shorter boundary in instant mode (fast worker acts as safety net)
+TAIL_SILENCE_SECS        = 1.0  # was 1.2 — P2 fires sooner at phrase boundary
+TAIL_SILENCE_INSTANT_SECS = 0.5  # was 0.7 — P1 gray appears sooner
 MAX_FAST_WAIT_SECS       = 3.0  # force fast-worker dispatch during continuous speech
 MAX_WAIT_SECS            = 10.0 # force large-worker dispatch if no phrase boundary for this long
 MAX_AUDIO_SECS           = 30.0 # cap chunk size sent to Whisper to avoid worker saturation
@@ -378,7 +378,7 @@ class VADTranscriptionPipeline:
         self._active_serials: list = _cfg.get("ACTIVE_SERIALS", [])
 
         self._workers: List[WhisperTranscriber] = [
-            WhisperTranscriber(model_size, cuda_device, compute_type)
+            WhisperTranscriber(model_size, cuda_device, compute_type, beam_size=3)
             for _ in range(self._num_workers)
         ]
         self._work_queue:     asyncio.Queue          = asyncio.Queue()
