@@ -110,7 +110,7 @@ _ui_config: dict = {}
 
 def _load_ui_config() -> None:
     global _ui_config
-    defaults: dict = {"saved_names": [], "profiles": [], "bench": [], "gains": {}, "gates": {}, "name_aliases": {}}
+    defaults: dict = {"saved_names": [], "profiles": [], "bench": [], "gains": {}, "gates": {}, "name_aliases": {}, "names": {}}
     try:
         if UI_CONFIG_FILE.exists():
             loaded = json.loads(UI_CONFIG_FILE.read_text(encoding="utf-8"))
@@ -594,9 +594,10 @@ async def startup():
                 name = _channel_label(device.bus_path, device.pw_node_name, suffix)
                 gain = _ui_config["gains"].get(name, DEFAULT_GAIN_PCT)
                 gate = _ui_config["gates"].get(name, DEFAULT_NOISE_GATE)
+                saved_name = _ui_config.get("names", {}).get(name, name)
                 active_speakers[dev_id] = {
                     "device_id": dev_id,
-                    "name": name,
+                    "name": saved_name,
                     "serial": name,
                     "pw_node_name": device.pw_node_name,
                     "mac": device.mac_address,
@@ -604,9 +605,9 @@ async def startup():
                     "noise_gate": gate,
                     "bus_path": device.bus_path,
                 }
-                pipeline.register_speaker(dev_id, name)
+                pipeline.register_speaker(dev_id, saved_name)
                 pipeline.set_noise_gate(dev_id, gate)
-                buffer_mgr.register_device(dev_id, name)
+                buffer_mgr.register_device(dev_id, saved_name)
             # Hardware gain: use L channel value (one physical device)
             name_l = _channel_label(device.bus_path, device.pw_node_name, "L")
             await _apply_gain(device, _ui_config["gains"].get(name_l, DEFAULT_GAIN_PCT))
@@ -615,9 +616,10 @@ async def startup():
             name = _channel_label(device.bus_path, device.pw_node_name)
             gain = _ui_config["gains"].get(name, DEFAULT_GAIN_PCT)
             gate = _ui_config["gates"].get(name, DEFAULT_NOISE_GATE)
+            saved_name = _ui_config.get("names", {}).get(name, name)
             active_speakers[device.id] = {
                 "device_id": device.id,
-                "name": name,
+                "name": saved_name,
                 "serial": name,
                 "pw_node_name": device.pw_node_name,
                 "mac": device.mac_address,
@@ -625,9 +627,9 @@ async def startup():
                 "noise_gate": gate,
                 "bus_path": device.bus_path,
             }
-            pipeline.register_speaker(device.id, name)
+            pipeline.register_speaker(device.id, saved_name)
             pipeline.set_noise_gate(device.id, gate)
-            buffer_mgr.register_device(device.id, name)
+            buffer_mgr.register_device(device.id, saved_name)
             await _apply_gain(device, gain)
             await audio_manager.start_capture(device, callback=on_audio_chunk)
 
@@ -727,32 +729,34 @@ async def hotplug_scanner():
                     if device.is_stereo:
                         for dev_id, suffix in [(device.id, "L"), (device.stereo_right_id, "R")]:
                             name = _channel_label(device.bus_path, device.pw_node_name, suffix)
+                            saved_name = _ui_config.get("names", {}).get(name, name)
                             active_speakers[dev_id] = {
                                 "device_id": dev_id,
-                                "name": name,
+                                "name": saved_name,
                                 "serial": name,
                                 "pw_node_name": device.pw_node_name,
                                 "mac": device.mac_address,
                             }
-                            pipeline.register_speaker(dev_id, name)
-                            buffer_mgr.register_device(dev_id, name)
+                            pipeline.register_speaker(dev_id, saved_name)
+                            buffer_mgr.register_device(dev_id, saved_name)
                             await broadcast({"type": "speaker_added", "data": active_speakers[dev_id]})
                         await audio_manager.start_capture(device, callback=on_audio_chunk)
                         logger.info(f"Hotplug: registered stereo (id={device.id})")
                     else:
                         name = _channel_label(device.bus_path, device.pw_node_name)
+                        saved_name = _ui_config.get("names", {}).get(name, name)
                         active_speakers[device.id] = {
                             "device_id": device.id,
-                            "name": name,
+                            "name": saved_name,
                             "serial": name,
                             "pw_node_name": device.pw_node_name,
                             "mac": device.mac_address,
                         }
-                        pipeline.register_speaker(device.id, name)
-                        buffer_mgr.register_device(device.id, name)
+                        pipeline.register_speaker(device.id, saved_name)
+                        buffer_mgr.register_device(device.id, saved_name)
                         await audio_manager.start_capture(device, callback=on_audio_chunk)
                         await broadcast({"type": "speaker_added", "data": active_speakers[device.id]})
-                        logger.info(f"Hotplug: registered {name} (id={device.id})")
+                        logger.info(f"Hotplug: registered {saved_name} (id={device.id})")
         except Exception as e:
             logger.error(f"Hotplug scan error: {e}")
 
@@ -817,6 +821,10 @@ async def rename_speaker(req: RenameRequest):
     await audio_manager.rename_device(req.device_id, req.new_name)  # best-effort
     pipeline.update_speaker_name(req.device_id, req.new_name)
     active_speakers[req.device_id]["name"] = req.new_name
+    serial = active_speakers[req.device_id].get("serial", "")
+    if serial:
+        _ui_config.setdefault("names", {})[serial] = req.new_name
+        _save_ui_config()
     logger.info(f"Renamed device {req.device_id} → '{req.new_name}'")
     await broadcast({"type": "speaker_renamed",
                      "data": {"device_id": req.device_id, "name": req.new_name}})
