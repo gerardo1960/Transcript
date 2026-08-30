@@ -8,6 +8,7 @@ Unified worker-pool Whisper architecture:
 import asyncio
 import logging
 import re
+import threading
 import time
 import uuid
 from collections import Counter
@@ -147,6 +148,10 @@ class WhisperTranscriber:
         self._stub_mode   = False
         self._busy        = False
         self._executor    = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper")
+        # Non-reentrant lock: prevents concurrent CTranslate2 calls after executor recycling.
+        # blocking=False in acquire() means a recycled thread that finds the old thread
+        # still running returns None immediately instead of deadlocking on the GPU.
+        self._model_lock  = threading.Lock()
         self.last_detected_language:             Optional[str] = None
         self.last_detected_language_probability: float         = 0.0
 
@@ -201,6 +206,19 @@ class WhisperTranscriber:
             self._busy = False
 
     def _transcribe_sync(self, audio: np.ndarray) -> Optional[TranscriptSegment]:
+        if not self._model_lock.acquire(blocking=False):
+            # A previous thread (from a recycled executor) still holds the model.
+            # Return None immediately rather than deadlocking on the GPU.
+            logger.warning("Model lock busy — skipping (concurrent call after timeout)")
+            return None
+        try:
+            if self.model is None:
+                return None
+            return self._transcribe_locked(audio)
+        finally:
+            self._model_lock.release()
+
+    def _transcribe_locked(self, audio: np.ndarray) -> Optional[TranscriptSegment]:
         segments, info = self.model.transcribe(
             audio,
             task="transcribe",
